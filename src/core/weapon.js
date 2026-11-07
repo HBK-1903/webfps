@@ -128,7 +128,7 @@ export function cancelReload(w) {
  * Try to fire one shot. Returns a shot description or null.
  * The caller turns this into a raycast and damage.
  */
-export function tryShoot(w, { aimPitch = 0, aimYaw = 0, moving = false, ads = false, triggerHeld } = {}) {
+export function tryShoot(w, { aimPitch = 0, aimYaw = 0, moving = false, ads = false, triggerHeld, rng = Math.random } = {}) {
   if (!canFire(w)) return null;
   // Semi-auto weapons need a fresh click; the caller passes the live trigger
   // state so a latched trigger (e.g. after a weapon switch) blocks the shot.
@@ -139,15 +139,15 @@ export function tryShoot(w, { aimPitch = 0, aimYaw = 0, moving = false, ads = fa
   const moveMul = moving ? sp.moveFactor : 1;
   const adsMul = ads ? sp.adsFactor : 1;
   const half = Math.min(sp.max, w.spread) * moveMul * adsMul;
-  const yawOffset = (Math.random() * 2 - 1) * half;
-  const pitchOffset = (Math.random() * 2 - 1) * half * 0.75;
+  const yawOffset = (rng() * 2 - 1) * half;
+  const pitchOffset = (rng() * 2 - 1) * half * 0.75;
   w.mag -= 1;
   w.cooldown = 60 / w.def.rpm;
   w.triggerHeld = true;
   w.shotsFired += 1;
   w.spread = Math.min(sp.max, w.spread + sp.perShot);
   w.recoilPitch += w.def.recoil.pitch * (ads ? 0.75 : 1);
-  w.recoilYaw += (Math.random() * 2 - 1) * w.def.recoil.yaw;
+  w.recoilYaw += (rng() * 2 - 1) * w.def.recoil.yaw;
   return {
     weaponId: w.id,
     yaw: aimYaw + degToRad(yawOffset),

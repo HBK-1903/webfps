@@ -119,7 +119,7 @@ export function updatePlayer(pc, input, ctx) {
 }
 
 /** Fire handling with weapon state; returns array of shot outcomes. */
-export function playerTryFire(pc, { actors, boxes }) {
+export function playerTryFire(pc, { actors, boxes, rng = Math.random }) {
   const a = pc.actor;
   const out = [];
   if (!a.alive) return out;
@@ -130,6 +130,7 @@ export function playerTryFire(pc, { actors, boxes }) {
     moving: a.speedFactor > 0.15,
     ads: pc.ads,
     triggerHeld: w.triggerHeld,
+    rng,
   });
   if (!shot) return out;
   const eye = eyePoint(a);

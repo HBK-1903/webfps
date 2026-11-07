@@ -81,6 +81,8 @@ export function createBrain(actor, profile, { rng = Math.random, lane = 'mid' } 
       this.coverTarget = null;
       this.holdTimer = 0;
       this.pushTimer = 0;
+      this.sweepTimer = 0;
+      this.detourUntil = 0;
       this.shots = 0;
       this.hits = 0;
       this.statusText = 'hazır';
@@ -147,9 +149,30 @@ export function refreshHuntZones(coordinator, grid, rng, match) {
       coordinator.hunt[team] = { x: spot.x, z: spot.z, time: match.time };
       continue;
     }
-    // 2) No fight yet: sweep the middle, then drift toward the enemy side.
+    const elapsed = match.roundElapsed || 0;
+    if (elapsed > 26) {
+      // 2) The round is dragging with no contact at all. Both squads fall back
+      // to sweeping the middle of the map — a pure map fact both teams know, so
+      // this leaks nothing — and the sweep ladder walks the centre so a round
+      // cannot end with the two squads having swapped spawns and missed.
+      const step = Math.floor((elapsed - 26) / 5);
+      const ladder = [
+        [0, 0], [-6, 6], [7, -6], [2, 10], [-8, -9],
+      ];
+      const [lx, lz] = ladder[step % ladder.length];
+      const side = team === 'A' ? -1 : 1;
+      const spot = grid.randomWalkable(rng, {
+        minX: lx - 4 + side * 2,
+        maxX: lx + 4 + side * 2,
+        minZ: lz - 4,
+        maxZ: lz + 4,
+      });
+      coordinator.hunt[team] = { x: spot.x, z: spot.z, time: match.time };
+      continue;
+    }
+    // 3) No fight yet: sweep the middle, then drift toward the enemy side.
     const towardEnemy = team === 'A' ? 1 : -1;
-    const drift = Math.min(14, (match.roundElapsed || 0) * 0.35) * towardEnemy;
+    const drift = Math.min(14, elapsed * 0.35) * towardEnemy;
     const spot = grid.randomWalkable(rng, {
       minX: Math.max(-24, Math.min(24, drift - 10)),
       maxX: Math.max(-24, Math.min(24, drift + 10)),
@@ -169,6 +192,25 @@ const ROTATE_LANE = { mid: 'mid', north: 'south', south: 'north' };
 export function laneForSlot(team, index) {
   const base = LANE_PATTERN[index % LANE_PATTERN.length];
   return team === 'B' ? ROTATE_LANE[base] : base;
+}
+
+/**
+ * Where the squad should sweep next. Uses only the team's shared search zone
+ * (map facts + stale contacts), so it never leaks a live enemy position. The
+ * squads are deliberately aimed at each other's half, which is what makes a
+ * contact-free round converge instead of circling.
+ */
+export function squadSweepGoal(coordinator, bot, grid) {
+  const zone = coordinator.hunt[bot.team];
+  const hz = zone || ENEMY_SPAWN_AREA[bot.team];
+  // Spread the squad around the zone in a loose line rather than stacking on the
+  // exact same cell; the offsets are staggered by slot, not random, so the squad
+  // keeps its shape while it moves.
+  const offX = ((bot.index % 3) - 1) * 3.4;
+  const offZ = (Math.floor(bot.index / 3) - 0.5) * 4.0;
+  const cell = grid.nearestWalkable(hz.x + offX, hz.z + offZ);
+  if (!cell) return null;
+  return grid.cellCenter(cell.c, cell.r);
 }
 
 export function assignLanes(match, coordinator) {
@@ -250,6 +292,15 @@ function setPathTo(bot, grid, x, z) {
   brain.repathTimer = 1.2;
 }
 
+/**
+ * Walk to a temporary goal (cover, squad sweep, spawn hunt) for `secs` seconds.
+ * ADVANCE honours this instead of immediately pathing back to the lane.
+ */
+function setDetour(bot, grid, x, z, match, secs = 6) {
+  setPathTo(bot, grid, x, z);
+  bot.brain.detourUntil = (match.time || 0) + secs;
+}
+
 function routePoint(bot, lane, index) {
   const routes = ROUTES[bot.team] && ROUTES[bot.team][lane];
   if (!routes || !routes.length) return null;
@@ -270,6 +321,13 @@ function advanceGoal(bot, grid) {
   if (!cell) return { x: route.x, z: route.z };
   const c = grid.cellCenter(cell.c, cell.r);
   return { x: c.x, z: c.z };
+}
+
+/** Distance to the current lane waypoint (used to decide if it was really reached). */
+function advanceGoalDistance(bot, grid) {
+  const goal = advanceGoal(bot, grid);
+  if (!goal) return Infinity;
+  return Math.hypot(goal.x - bot.x, goal.z - bot.z);
 }
 
 function tryAdvanceLane(bot) {
@@ -390,6 +448,7 @@ function combatTick(match, bot, dt, ctx) {
       moving: a.speedFactor > 0.3,
       ads: true,
       triggerHeld: w.triggerHeld,
+      rng: brain.rng,
     });
     if (shot) {
       brain.shots++;
@@ -409,6 +468,53 @@ function combatTick(match, bot, dt, ctx) {
         brain.burstLeft = profile.burstShots;
       }
     }
+  }
+}
+
+/**
+ * Keep actors from standing inside each other. Pushes the bot out of any ally
+ * (and the player) that is closer than `separateRadius`, using the same
+ * box-aware movement as everything else, so it can never be shoved into a wall.
+ */
+export function separateFromOthers(match, bot, boxes, separateRadius = 0.92) {
+  // Only true body overlap is resolved (2 * PLAYER.radius is ~0.84 m). A larger
+  // radius would fight the path follower: in the narrow spawn door the bots have
+  // to queue single file, and pushing them apart there just cancelled the
+  // forward step and left the whole squad stuck in the corridor.
+  let px = bot.x;
+  let pz = bot.z;
+  const myGoal = bot.brain && bot.brain.pathGoal;
+  const myDist = myGoal ? Math.hypot(myGoal.x - px, myGoal.z - pz) : Infinity;
+  for (const other of match.actors) {
+    if (other === bot || !other.alive) continue;
+    const dx = px - other.x;
+    const dz = pz - other.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist >= separateRadius) continue;
+    // Asymmetric on purpose: the actor that is further from its own goal yields.
+    // Pushing both out at once made two bots in a corridor shove each other
+    // backwards in a deadlock; this way the squad queues through doorways.
+    if (!other.isPlayer) {
+      const otherGoal = other.brain && other.brain.pathGoal;
+      const otherDist = otherGoal ? Math.hypot(otherGoal.x - other.x, otherGoal.z - other.z) : Infinity;
+      if (myDist <= otherDist) continue;
+    }
+    if (dist < 1e-4) {
+      // Exactly stacked: pick a deterministic direction from the slot index.
+      const ang = (bot.index + 1) * 2.399963;
+      px += Math.sin(ang) * 0.02;
+      pz += Math.cos(ang) * 0.02;
+      continue;
+    }
+    // Push the full overlap out, mostly out of the way of the other actor.
+    const push = separateRadius - dist;
+    const moved = moveCircle(px, pz, (dx / dist) * push, (dz / dist) * push, PLAYER.radius, boxes);
+    px = moved.x;
+    pz = moved.z;
+  }
+  if (px !== bot.x || pz !== bot.z) {
+    bot.x = px;
+    bot.z = pz;
   }
 }
 
@@ -526,7 +632,8 @@ export function updateBot(match, bot, dt, ctx) {
     case BOT_STATE.SPAWN:
     case BOT_STATE.ADVANCE: {
       brain.statusText = 'ilerliyor';
-      if (brain.path.length === 0 || brain.repathTimer <= 0) {
+      const onDetour = brain.detourUntil > match.time && brain.path.length > 0;
+      if (!onDetour && (brain.path.length === 0 || brain.repathTimer <= 0)) {
         const goal = advanceGoal(bot, grid);
         if (goal) {
           if (!brain.pathGoal || Math.hypot(goal.x - brain.pathGoal.x, goal.z - brain.pathGoal.z) > 1.5) {
@@ -539,9 +646,14 @@ export function updateBot(match, bot, dt, ctx) {
       const arrived = followPath(bot, grid, boxes, dt);
       if (arrived) {
         if (brain.state === BOT_STATE.SPAWN) brain.state = BOT_STATE.ADVANCE;
+        // Only consume a lane waypoint when the bot actually walked to the lane
+        // point. Detour goals (squad sweep, cover, spawn hunt) also finish here,
+        // and treating those as "waypoint done" burned through the whole lane
+        // list in a few seconds.
+        const atLanePoint = advanceGoalDistance(bot, grid) < 3.2;
         const before = brain.laneIndex;
-        tryAdvanceLane(bot);
-        if (before === brain.laneIndex) {
+        if (atLanePoint) tryAdvanceLane(bot);
+        if (before === brain.laneIndex && atLanePoint) {
           // Reached the end of the lane: hold with a little strafing.
           brain.state = BOT_STATE.HOLD;
           brain.statusText = 'mevzi tutuyor';
@@ -555,15 +667,14 @@ export function updateBot(match, bot, dt, ctx) {
     case BOT_STATE.HOLD: {
       brain.statusText = 'mevzi tutuyor';
       brain.holdTimer += dt;
+      brain.sweepTimer += dt;
       // Nothing to shoot for a while: push deeper so rounds always resolve.
       if (ctx.coordinator && ctx.coordinator.hunt[bot.team] && (brain.holdTimer > prof.pushAfter * 0.7 || match.roundElapsed > 24)) {
-        const hz = ctx.coordinator.hunt[bot.team];
-        const offX = ((bot.index % 3) - 1) * 3.2;
-        const offZ = (Math.floor(bot.index / 3) - 0.5) * 3.2;
-        const spot = grid.nearestWalkable(hz.x + offX, hz.z + offZ);
-        if (spot) {
-          const p = grid.cellCenter(spot.c, spot.r);
-          setPathTo(bot, grid, p.x, p.z);
+        // Move to the squad's search zone. This is a *detour*: the lane index is
+        // untouched, so the bot can resume its route afterwards.
+        const goal = squadSweepGoal(ctx.coordinator, bot, grid);
+        if (goal) {
+          setDetour(bot, grid, goal.x, goal.z, match, 7);
           brain.state = BOT_STATE.ADVANCE;
           brain.statusText = 'bölge tarıyor';
           brain.holdTimer = 0;
@@ -573,7 +684,20 @@ export function updateBot(match, bot, dt, ctx) {
       if (brain.holdTimer > prof.pushAfter || match.roundElapsed > 32) {
         brain.holdTimer = 0;
         const route = ROUTES[bot.team][brain.lane];
-        if (brain.laneIndex < route.length - 1) {
+        const laneDone = brain.laneIndex >= route.length - 1;
+        if (!laneDone && brain.sweepTimer < 6 && ctx.coordinator) {
+          // Lane waypoint left, but the round is young and quiet: sweep the
+          // squad zone first. Without this a squad walks its lanes, stops, and
+          // both teams end up camping opposite corners.
+          const goal = squadSweepGoal(ctx.coordinator, bot, grid);
+          if (goal) {
+            setDetour(bot, grid, goal.x, goal.z, match, 7);
+            brain.state = BOT_STATE.ADVANCE;
+            brain.statusText = 'bölge süpürüyor';
+            break;
+          }
+        }
+        if (!laneDone) {
           // Still a lane ahead: push deeper instead of camping.
           brain.laneIndex += 1;
           const next = route[brain.laneIndex];
@@ -581,19 +705,19 @@ export function updateBot(match, bot, dt, ctx) {
             minX: next.x - 3, maxX: next.x + 3, minZ: next.z - 4, maxZ: next.z + 4,
           });
           if (spot) {
-            setPathTo(bot, grid, spot.x, spot.z);
+            setDetour(bot, grid, spot.x, spot.z, match, 8);
             brain.state = BOT_STATE.ADVANCE;
             brain.statusText = 'ilerliyor';
           }
         } else {
-          // Lane exhausted: hunt the enemy spawn area (a known map fact, not
-          // knowledge of where a specific enemy stands).
-          const area = ENEMY_SPAWN_AREA[bot.team];
-          const spot = grid.randomWalkable(brain.rng, area);
+          // Lane exhausted: sweep the squad zone, or hunt the enemy spawn area
+          // (a known map fact, not knowledge of where a specific enemy stands).
+          const sweep = ctx.coordinator ? squadSweepGoal(ctx.coordinator, bot, grid) : null;
+          const spot = sweep || grid.randomWalkable(brain.rng, ENEMY_SPAWN_AREA[bot.team]);
           if (spot) {
-            setPathTo(bot, grid, spot.x, spot.z);
+            setDetour(bot, grid, spot.x, spot.z, match, sweep ? 7 : 9);
             brain.state = BOT_STATE.ADVANCE;
-            brain.statusText = 'ilerliyor';
+            brain.statusText = sweep ? 'bölge süpürüyor' : 'ilerliyor';
           }
         }
       }
@@ -624,12 +748,16 @@ export function updateBot(match, bot, dt, ctx) {
         if (brain.path.length === 0) setPathTo(bot, grid, brain.lastSeen.x, brain.lastSeen.z);
         const arrived = followPath(bot, grid, boxes, dt, 0.95);
         if (arrived || brain.investigateTimer <= 0) {
-          // Look around where the contact was, then resume advancing.
+          // Look around where the contact was, then resume advancing. The lane
+          // counter may only advance when the bot actually reached the lane
+          // point — otherwise investigating a sound on the far side of the map
+          // skipped whole waypoints and left the bot wandering near the enemy
+          // spawn with no route left to follow.
           brain.lastSeen = null;
           brain.investigateTimer = 0;
           brain.path = [];
           brain.state = BOT_STATE.ADVANCE;
-          brain.laneIndex = Math.min(brain.laneIndex + 1, (ROUTES[bot.team][brain.lane] || []).length - 1);
+          if (advanceGoalDistance(bot, grid) < 3.2) tryAdvanceLane(bot);
         }
       } else if (brain.investigateTimer <= 0) {
         brain.state = BOT_STATE.ADVANCE;
@@ -720,7 +848,8 @@ export function updateBot(match, bot, dt, ctx) {
     }
   }
 
-  // Safety: keep everyone inside the map.
+  // Safety: keep everyone inside the map, and never stand inside a teammate.
+  separateFromOthers(match, bot, boxes);
   bot.x = Math.max(-30.5, Math.min(30.5, bot.x));
   bot.z = Math.max(-20.5, Math.min(20.5, bot.z));
 

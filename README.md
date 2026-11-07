@@ -38,7 +38,7 @@ npm run build        # -> dist/SifirNokta.html  (tek dosya, her şey gömülü)
 
 ### Testler ve kalite kapısı
 ```bash
-npm test             # 81 test, tamamı headless (Node + jsdom)
+npm test             # 89 test, tamamı headless (Node + jsdom)
 npm run lint         # ESLint (gerçek hata odaklı kural seti)
 npm run verify       # lint + test + build — tek komutta tam doğrulama
 npm run qa           # scripted playtest → docs/QA-REPORT.md
@@ -78,7 +78,11 @@ Hepsi `localStorage`'da saklanır ve yeniden açılışta korunur.
 - İlk 3 raundu alan maçı kazanır (max 5 raund). 2-2 beraberlik de doğru raporlanır.
 - Raund sonu ekranı, skor, pip göstergeleri, maç sonu istatistikleri, yeniden maç / ana menü.
 - Tek yetkili durum makinesi (`MatchManager`) — çift raund/maç tetiklenmesi engellenir (idempotent).
-- **Tıkanma koruması:** 80 saniyede çözülmeyen raund hayatta kalan sayısı → toplam can/zırh ile karara bağlanır.
+- **Kamp yapmama:** temas olmayan raundlarda takım tek arama bölgesini birlikte süpürür, 26 s'den sonra
+  iki takım da haritanın merkezine yürür. Bu, raundların süre limitine takılmasını pratikte bitirdi
+  (ölçülen tıkanma oranı **%0–3**).
+- **Tıkanma koruması (son çare):** 80 saniyede çözülmeyen raund hayatta kalan sayısı → toplam can/zırh ile
+  karara bağlanır.
 
 **Oyuncu ve silahlar**
 - FPS hareketi: ivme, sürtünme, duvar kaydırma, sub-step çarpışma (tünelleme yok), çömelme yüksekliği.
@@ -103,8 +107,10 @@ Hepsi `localStorage`'da saklanır ve yeniden açılışta korunur.
 - Görüş: FOV konisi + mesafe + **gerçek LOS raycast** — duvar arkası görülmez, zorluk LOS'u atlatmaz.
 - Son görülen konumu araştırma; ses ipuçları **yaklaşık** konum verir (tam koordinat sızdırmaz).
 - A* ızgara navigasyonu, 3 şerit (orta/kuzey/güney), takım arkadaşları arasında şerit dağıtımı,
-  paylaşılan arama bölgesi (yığılma yerine yayılma), sıkışma tespiti + yeniden yol bulma.
+  paylaşılan arama bölgesi (yığılma yerine yayılma), takım süpürmesi, sıkışma tespiti + yeniden yol bulma.
+- Gövde çakışması çözülür (tek yönlü itme): botlar birbirinin içine girmez, kapılardan sırayla geçer.
 - Durumlar: spawn → advance → engage → investigate → reload → retreat → hold.
+- Detour hedefleri (siper, süpürme, kovalama) süreli kilit ile korunur; bot iki nokta arasında gidip gelmez.
 - Silah yönetimi: boş şarjörde asla ateş etmez, reload eder, gerekirse tabancaya geçer.
 - Zorluk yalnızca tepki süresi, nişan hatası, karar hızı ve koordinasyonu değiştirir (hasar sabit):
 
@@ -151,7 +157,7 @@ src/
     scene.js  actorRigs.js  viewmodel.js  fx.js
   ui/                   # HUD, ses, ayarlar (localStorage)
   main.js               # uygulama kabuğu: menü akışı, input, pointer lock, render döngüsü
-tests/                  # 72 test (core, AI, HUD, e2e app boot)
+tests/                  # 89 test (core, AI, HUD, e2e app boot)
 tools/serve.mjs         # dev sunucusu
 tools/sim.mjs           # headless maç simülatörü
 build.mjs               # tek dosya offline build
@@ -164,7 +170,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 
 ## 5. Test raporu
 
-`npm test` → **84/84 geçti** (Node 22 + jsdom, headless):
+`npm test` → **89/89 geçti** (Node 22 + jsdom, headless):
 
 | Dosya | Kapsam |
 |---|---|
@@ -172,27 +178,32 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 | `tests/weapons.test.js` (12) | Ateş hızı, tek/otomatik tetik, boş şarjör, reload transferi/iptali, ateş kilidi, geri tepme birikmesi/toparlanması, yayılma |
 | `tests/match.test.js` (11) | 5v5 kurulum, geri sayım, eleme ile raund sonu, çift tetiklenmeme, raund reseti (can/zırh/ammo/pozisyon), ilk-3 zafer, beraberlik, tıkanma kararı, maç sonu dondurma |
 | `tests/nav.test.js` (11) | Yürünebilirlik, spawn simetrisi ve güvenliği, A* erişilebilirliği, tünelleme yok, LOS, ray-cast |
-| `tests/ai.test.js` (9) | Duvar arkasını görmeme, FOV konisi, zorluk farkı (ölçülmüş tepki/isabet), son bilinen konum, işitme gürültüsü, boş şarjörle ateş etmeme, harita dışına çıkmama, yığılmama |
+| `tests/ai.test.js` (16) | Duvar arkasını görmeme, FOV konisi, zorluk farkı (ölçülmüş tepki/isabet), son bilinen konum, işitme gürültüsü, boş şarjörle ateş etmeme, harita dışına çıkmama, yığılmama, lane yürüyüşü (spawn'da kilitlenmeme), sessiz raundun çözülmesi (tıkanma bütçesi), tohumlu maç tekrarlanabilirliği (determinizm), takım arkadaşıyla ayrışma |
 | `tests/integration.test.js` (11) | 3 zorlukta tam maç bitişi, geri sayımda hasar/ateş kilidi, ölüyken ateş, dost ateşi, kafa isabeti, duraklatma dondurması, restart temizliği, HUD durumu, hassasiyet etkisi |
 | `tests/ui.test.js` (5) | Gerçek HTML + gerçek HUD bağlaması, reload/boş şarjör, raund sonucu, ayar doğrulama/kalıcılık, tüm kontrol ID'leri |
 | `tests/integration.test.js` (14) | + canlı zorluk değişimi, paylaşılan nav grid, `gameSnapshot` sözleşmesi |
-| `tests/app.e2e.test.js` (3) | `src/main.js` jsdom'da gerçekten çalıştırılır: menü → ayarlar → kontroller → zorluk → maç → hareket/ateş/reload/silah değiştirme → Esc duraklatma → duraklatma ayarları → maç sonu → yeniden maç → menüye dönüş → yeni maç; F3 debug katmanı; **çalışma zamanı hatası olmamalı** |
+| `tests/app.e2e.test.js` (4) | `src/main.js` jsdom'da gerçekten çalıştırılır: menü → ayarlar → kontroller → zorluk → maç → hareket/ateş/reload/silah değiştirme → Esc duraklatma → duraklatma ayarları → maç sonu → yeniden maç → menüye dönüş → yeni maç; F2 ayar paneli; F3 debug katmanı; **çalışma zamanı hatası olmamalı** |
 | `tests/render-math.test.js` (4) | Render açı konvansiyonu oyunla birebir: kamera ileri vektörü = `directionFromAngles`, nişan ile çarpışma aynı yönü gösterir, model yönü doğru (bu sınıf hata crosshair'i ters çevirir) |
 
-**`npm run qa`** (scripted playtest → `docs/QA-REPORT.md`): son koşu **34-35 geçti / 0 hata**.
+**`npm run qa`** (scripted playtest → `docs/QA-REPORT.md`): son koşu **35 geçti / 0 uyarı / 0 hata**.
 Ölçülenler:
 
-- 3 zorlukta 12 tam maç: hepsi bitti; ortalama raund süresi kolay ~34–47 s / normal ~36 s / zor ~22–26 s.
-- Süre limitiyle karara bağlanan raund oranı: kolay ~%18–30, normal ~%9–25, zor ~%4–9.
+- 3 zorlukta 4 tam maç (QA betiği): hepsi bitti, skorlar 0-3 … 3-2; ortalama raund süresi kolay 28 s /
+  normal 24 s / zor ~18 s, en uzun raund 53 s.
+- Süre limitiyle karara bağlanan raund: 3 zorlukta toplam **0/47** (17+14+16 raund; 60 maçlık matriste %0–3).
 - Bot isabet oranları: kolay ~%15, normal ~%22, zor ~%36 → zorluk **ölçülebilir** biçimde ayrışıyor,
   zor botlar bile atışlarının çoğunu kaçırıyor (LOS + nişan hatası gerçekten çalışıyor).
 
-**`npm run matrix`** (denge matrisi, 24 maç/hücre → `docs/qa-matrix.json`): oyuncunun takımının
-kazanma oranı — kolayda otomatik oyuncuyla ~%83, normalde ~%54, zorda ~%63; hareketsiz (idle) oyuncuyla
-kolay/normalde ~%20 ve zorda ~%17. Yani zorluk kademeleri arasında gerçek bir fark var.
+**`npm run matrix`** (denge matrisi, **60 maç/hücre** → `docs/qa-matrix.json`):
+oyuncunun takımının kazanma oranı — kolayda otomatik oyuncuyla %75, normalde %62, zorda %47; hareketsiz
+(idle) oyuncuyla kolayda %23, normalde %8, zorda %8. Zorluk kademeleri arasında gerçek bir fark var ve
+sıra tutarlı: hareketsiz oyuncu her kademede kaybediyor, zor botlar otomatik oyuncuyu bile %50'nin altına
+çekiyor. Ortalama raund süreleri kolay 28–29 s, normal 17–25 s, zor 14–18 s; **tıkanan raund oranı %0–3**
+(hedef <%25).
 
-**Tarafsızlık (side bias) testi:** harita 180° dönel simetrik, 5v5 saf bot maçlarında raund kazanma
-oranı %49–57 aralığında (taraflardan biri kayrılmıyor). 1v1 düello testinde 40 maçın 21'i ALFA, 19'u
+**Tarafsızlık (side bias) testi:** harita 180° dönel simetrik; 5v5 saf bot maçlarında (10 tohumlu maç,
+42 karara bağlanmış raund) ALFA 23 / BRAVO 19 raund kazandı (%54.8 / %45.2). Test tohumlu (seeded) olduğu için bu sayı
+koşudan koşuya değişmez; ayrıntısı §7b'deki "düzeltilen hatalar" maddelerinde. 1v1 düello testinde 40 maçın 21'i ALFA, 19'u
 BRAVO kazandı. Oyuncunun hareketsiz kalması ise **kendi takımını gerçekten zayıflatır** (4 bot 5 bota
 karşı kalır) — bu bir denge hatası değil, tasarımın doğal sonucudur ve README'de açıkça yazılıdır.
 - Yeniden doğma yok, oyuncu başına raund başına en fazla 1 ölüm, duraklatmada hiçbir aktör değişmiyor,
@@ -217,7 +228,8 @@ Oynanış sizin tarafınızda önizlemede/`dist` dosyasında doğrulanmalı.
    takım arkadaşından geçer, hasar vermez.
 3. **Raund sonu:** sadece tam eleme. Bomba yok. **Tıkanma koruması** olarak 80 saniyelik raund limiti:
    süre dolarsa hayatta kalan sayısı, eşitse toplam can+zırh üstünlüğü kazanır (yoksa beraberlik).
-   Bu, "sadece eleme" kuralını bozmadan AI kampını engellemek için eklendi.
+   Bu, "sadece eleme" kuralını bozmadan AI kampını engellemek için eklendi; birincil çözüm ise takım
+   süpürmesi (bkz. §7b, madde 6) — süre limiti artık yalnızca güvenlik ağı.
 4. **Zorluk:** hasar/stok değerleri her seviyede aynı; yalnızca tepki, nişan hatası, karar hızı,
    koordinasyon, görüş açısı/mesafesi değişir. Zor botlar dahi LOS'a tabidir ve asla %100 isabet etmez.
 5. **Silahlar:** tabanca tek tek, tüfek otomatik; her ikisi de raund başında tam cephane ile verilir
@@ -246,6 +258,39 @@ Oynanış sizin tarafınızda önizlemede/`dist` dosyasında doğrulanmalı.
   okuyucuyla oynanabilir bir nişancı deneyimi hedeflenmedi. Gamepad desteği kapsam dışı.
 - **Hareketsiz oynayan kazanmaz:** oyuncu ölü/hareketsiz kaldığında takımı 4 botla 5 bota karşı kalır;
   bu yüzden "hiçbir şey yapmama" oranı düşüktür (bkz. `npm run matrix`). Bilinçli bir tasarım sonucudur.
+
+---
+
+## 7b. Bu sürümde bulunan ve düzeltilen gerçek hatalar
+
+Flaky (kararsız) testleri kovalarken ortaya çıkan, oynanışı doğrudan etkileyen hatalar. Hepsi için
+regresyon testi eklendi (`tests/ai.test.js`), yani bir daha sessizce geri gelmiyorlar.
+
+1. **Tohumlu maçlar deterministik değildi.** Silah yayılması ve geri tepmesi küresel `Math.random()`
+   kullanıyordu; `createGame({ seed })` verilse bile maç koşudan koşuya değişiyordu. Artık tüm rastgelelik
+   maç RNG'sinden (bot başına ayrı akış) geçiyor → aynı tohum aynı maç. Bu, denge ölçümlerinin ve
+   testlerin tekrarlanabilir olmasının ön koşuluydu.
+2. **Taraf kayırması (side bias) gerçekti.** Botlar her tick `match.actors` sırasına göre güncelleniyordu;
+   ALFA her zaman önce davranıp BRAVO'nun yeni pozisyonunu görüyor, BRAVO bir tick geriden geliyordu.
+   60 maçta ALFA raundların %57.7'sini kazanıyordu. Güncelleme sırası artık tick başına dönüşümlü →
+   %49.4 (ve test artık deterministik olduğu için dalgalanmıyor: 42 raundun 23'ü ALFA).
+3. **Botlar spawn koridorunda birbirini kilitleyebiliyordu.** Takım arkadaşına değen bot birebir geri
+   itiliyor, ilerleme sıfırlanıyordu; 20 saniyede 1 metre yol alan botlar vardı. Ayrışma artık tek yönlü
+   (hedefe uzak olan çekilir) → takım kapılardan sırayla geçiyor.
+4. **ADVANCE her 1.2 saniyede lane hedefine geri dönüyordu.** Bu yüzden siper/süpürme/kovalama gibi tüm
+   "detour" hedefleri ilk tick'te siliniyor, botlar iki nokta arasında gidip geliyordu. Detour artık
+   süreli bir kilit (`detourUntil`) ile korunuyor.
+5. **Lane sayacı hatalı ilerliyordu.** Hem `INVESTIGATE`'ten çıkarken hem de herhangi bir hedefe varınca
+   sayaç artıyordu; bot bir raundda lane listesini tüketip hedefsiz kalıyordu. Artık sayaç yalnızca lane
+   noktasına gerçekten varınca artıyor.
+6. **Sessiz raundlar süre limitine takılıyordu.** İki takım da kendi lane'ini yürüyüp karşı köşede kamp
+   kuruyordu; tıkanan raund oranı %26'ydı. Takım halinde süpürme (squad sweep) eklendi: temas yokken
+   takım tek bir arama bölgesine birlikte gidiyor, 26 saniyeden sonra iki takım da haritanın merkezine
+   süpürüyor (sadece harita bilgisi — düşmanın canlı pozisyonu asla kullanılmıyor). Tıkanma **%26 → %1**.
+
+Bu maddeler aynı zamanda şartnamedeki "zorluk sadece tepki/nişan/karar/koordinasyonu değiştirir, hile
+görüş yok" kuralının korunduğunu gösterir: düzeltmelerin hiçbiri botlara ek bilgi vermedi, sadece
+kendi harita bilgilerini doğru kullanmalarını sağladı.
 
 ---
 
@@ -288,13 +333,13 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 81 headless test |
+| `npm test` | 89 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
 | `npm run verify` | lint + test + a11y + build |
 | `npm run build` | Tek dosya offline build (`dist/SifirNokta.html`) |
 | `npm run qa` | Senaryolu playtest + `docs/QA-REPORT.md` (JSON: `node tools/qa.mjs --json`) |
-| `npm run matrix` | Denge matrisi: zorluk × oyuncu modu, kazanma/tıkanma oranları (`docs/qa-matrix.json`) |
+| `npm run matrix` | Denge matrisi: zorluk × oyuncu modu, kazanma/tıkanma oranları (`docs/qa-matrix.json`). Güncel tablo: 60 maç/hücre, 360 maç |
 | `npm run sim -- <zorluk> <seed> <maç>` | Headless maç simülatörü |
 
 İncelenip değerlendirilen GitHub kaynakları (ve bilinçli olarak alınmayanlar): [`docs/KAYNAKLAR.md`](docs/KAYNAKLAR.md).

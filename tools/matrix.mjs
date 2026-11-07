@@ -5,6 +5,7 @@
 //   node tools/matrix.mjs [--matches N] [--json]
 
 import { createGame, updateGame } from '../src/core/game.js';
+import { resetActorIds } from '../src/core/actor.js';
 import { PHASE } from '../src/core/match.js';
 import { MATCH } from '../src/core/config.js';
 
@@ -18,6 +19,10 @@ const WANT_JSON = args.includes('--json');
 
 /** `idle` player stands still at spawn; `auto` aims and fires at the closest enemy. */
 function playMatch(difficulty, seed, playerMode) {
+  // Actor ids feed the per-actor RNG streams, so they must start from the same
+  // baseline for every match — otherwise a cell's numbers depend on how many
+  // matches ran before it and the table is not reproducible.
+  resetActorIds();
   const game = createGame({ difficulty, seed });
   const roundTimes = [];
   let liveStart = 0;

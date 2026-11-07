@@ -1,6 +1,6 @@
 # QA RAPORU — SIFIR NOKTA
 
-Üretim: `node tools/qa.mjs` · 2026-11-07 09:25 UTC
+Üretim: `node tools/qa.mjs` · 2026-11-07 10:15 UTC
 
 | Geçti | Uyarı | Hata |
 |---|---|---|
@@ -14,32 +14,32 @@
 
 | Durum | Senaryo | Ölçüm |
 |---|---|---|
-| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 3-1, 3-1, 0-3, 2-3 |
-| ✅ PASS | raund süresi | ort 37.5 s · en uzun 80.0 s |
-| ✅ PASS | tıkanma oranı | 4/16 raund süre limitiyle karara bağlandı |
+| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 0-3, 2-3, 3-1, 3-2 |
+| ✅ PASS | raund süresi | ort 28.3 s · en uzun 53.5 s |
+| ✅ PASS | tıkanma oranı | 0/17 raund süre limitiyle karara bağlandı |
 
 ## maç/normal
 
 | Durum | Senaryo | Ölçüm |
 |---|---|---|
-| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 0-3, 0-3, 0-3, 0-3 |
-| ✅ PASS | raund süresi | ort 37.0 s · en uzun 80.0 s |
-| ✅ PASS | tıkanma oranı | 3/12 raund süre limitiyle karara bağlandı |
+| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 0-3, 2-3, 0-3, 0-3 |
+| ✅ PASS | raund süresi | ort 23.5 s · en uzun 45.6 s |
+| ✅ PASS | tıkanma oranı | 0/14 raund süre limitiyle karara bağlandı |
 
 ## maç/hard
 
 | Durum | Senaryo | Ölçüm |
 |---|---|---|
-| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 3-1, 0-3, 2-3, 3-2 |
-| ✅ PASS | raund süresi | ort 19.4 s · en uzun 80.0 s |
-| ✅ PASS | tıkanma oranı | 1/17 raund süre limitiyle karara bağlandı |
+| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 0-3, 2-3, 2-3, 0-3 |
+| ✅ PASS | raund süresi | ort 17.9 s · en uzun 30.3 s |
+| ✅ PASS | tıkanma oranı | 0/16 raund süre limitiyle karara bağlandı |
 
 ## zorluk
 
 | Durum | Senaryo | Ölçüm |
 |---|---|---|
-| ✅ PASS | bot isabet oranı | kolay 15% (128/847) · normal 19% (136/723) · zor 29% (129/445) |
-| ✅ PASS | ayrışma | zor/kolay isabet farkı 92% |
+| ✅ PASS | bot isabet oranı | kolay 15% (132/886) · normal 19% (137/713) · zor 30% (125/413) |
+| ✅ PASS | ayrışma | zor/kolay isabet farkı 103% |
 | ✅ PASS | hata payı | zor botlar da kaçırıyor (LOS ve nişan hatası korunuyor) |
 | ✅ PASS | canlı geçiş | tüm botlar yeni profile geçti |
 | ✅ PASS | hasar sabitliği | maks can 100/100 (zorluk hasarı değiştirmiyor) |

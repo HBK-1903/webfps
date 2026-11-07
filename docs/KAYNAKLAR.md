@@ -60,7 +60,8 @@ Ek olarak değerlendirilen FPS referansları (kod kopyalanmadı, yalnızca yakla
   3. HUD'un ilk karede bir önceki maçtan kalma değerleri göstermesi.
 - **Otomatik QA ajanı (`tools/qa.mjs`)** → kolay botların raundların %72'sini süre limitine bıraktığını
   ölçtü; zorluk profilleri yeniden dengelendi (kolay: görüş 30→38 m, FOV 100→112°, investigate 3.5→2.4 s,
-  `pushAfter` merkezi parametresi). Sonuç: kolayda tıkanma %72 → %39, normal %31 → %25, zor %35 → %27.
+  `pushAfter` merkezi parametresi). Sonraki turda takım süpürmesi + detour kilidi eklendi:
+  60 maç/hücre matriste tıkanma kolay %3, normal %1, zor %0 (ayrıntı: README §7b).
 - **FPS referansları** → pointer-lock + `unadjustedMovement` geri düşüşü ve `movementX/Y` tabanlı bakış
   yaklaşımı doğrulandı (kod kopyalanmadı).
 - **lil-gui** → oyun içi denge paneli (F2). Değerler doğrudan `config.js` nesnelerine yazıldığı için
@@ -68,3 +69,7 @@ Ek olarak değerlendirilen FPS referansları (kod kopyalanmadı, yalnızca yakla
 - **axe-core** → erişilebilirlik kapısı. Elle yazılmış işaretlemedeki gerçek hataları buldu:
   ekranların landmark'ı yoktu, dialog rolleri ve `aria-labelledby` hedefleri eksikti, killfeed
   `role="log"` değildi. Hepsi düzeltildi ve `npm run verify` artık bunu zorunlu tutuyor.
+- **Flaky test kovalama** → kararsız iki test (yığılma, taraf kayırması) yalnızca eşik sorunu sanılmıştı;
+  determinizm eklendiğinde altta **beş gerçek oynanış hatası** çıktı (README §7b). Ders: rastgeleliği
+  tohumlamak, testi "yeşile boyamak" değil, ölçüm aracını düzeltmektir. Bu turdan sonra 40 tam koşu
+  üst üste hatasız geçti (89/89 test, 0 flake).

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBrain, canSee, updateBot, hearSound, BOT_STATE, createCoordinator, assignLanes } from '../src/core/bot.js';
 import { createMatch, startMatch, PHASE, updateMatch } from '../src/core/match.js';
-import { createActor } from '../src/core/actor.js';
+import { createActor, resetActorIds } from '../src/core/actor.js';
 import { MAP_AABBS } from '../src/core/map.js';
 import { NavGrid } from '../src/core/navgrid.js';
 import { DIFFICULTY, PLAYER } from '../src/core/config.js';
@@ -200,28 +200,42 @@ test('bots spread across lanes instead of stacking on one point', () => {
   const lanes = new Set(match.actors.filter((a) => a.brain && !a.isPlayer).map((a) => a.brain.lane));
   assert.ok(lanes.size >= 3, 'the squad must use all available lanes');
 
-  // Run a while, then check they are not all on top of each other.
+  // Run a while, checking continuously that they are not on top of each other.
+  // Sample the whole 25 s window (a single end-of-run snapshot used to flake
+  // whenever two bots happened to cross a doorway together). Bots flow through
+  // chokepoints, so a transient pair is allowed; what must not happen is a squad
+  // that sits on top of itself.
+  let worst = 0;
+  let samples = 0;
   for (let i = 0; i < 60 * 25; i++) {
     match.time += 1 / 60;
     updateMatch(match, 1 / 60);
     for (const bot of match.actors) if (bot.brain && bot.alive) updateBot(match, bot, 1 / 60, { grid, boxes: MAP_AABBS, coordinator: coord });
-  }
-  const alive = match.actors.filter((a) => a.team === 'A' && a.alive);
-  let close = 0;
-  for (let i = 0; i < alive.length; i++) {
-    for (let j = i + 1; j < alive.length; j++) {
-      if (Math.hypot(alive[i].x - alive[j].x, alive[i].z - alive[j].z) < 1.2) close++;
+    if (i % 30 !== 0) continue;
+    samples++;
+    const alive = match.actors.filter((a) => a.team === 'A' && a.alive);
+    let close = 0;
+    for (let x = 0; x < alive.length; x++) {
+      for (let y = x + 1; y < alive.length; y++) {
+        if (Math.hypot(alive[x].x - alive[y].x, alive[x].z - alive[y].z) < 1.2) close++;
+      }
     }
+    worst = Math.max(worst, close);
   }
-  assert.ok(close <= 1, `bots are clumping (${close} overlapping pairs)`);
+  assert.ok(samples > 40, 'expected plenty of samples');
+  assert.ok(worst <= 1, `bots are clumping (up to ${worst} overlapping pairs in one 0.5 s window)`);
 });
 
 test('5v5 bot-vs-bot matches are not biased toward one side', () => {
   // A mirror-symmetric map plus symmetric AI must produce a roughly even split.
   // This catches asymmetric cover, lane assignment or spawn disadvantage.
+  // Seeded and reproducible: every source of randomness (bot decisions, weapon
+  // spread, recoil) runs off the match RNG, so this number cannot drift between
+  // runs. Update order is alternated per tick, so a fixed order cannot favour A.
   let roundsA = 0;
   let roundsB = 0;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
+    resetActorIds(); // ids feed the per-actor RNG streams
     const game = createGame({ difficulty: 'normal', seed: 4000 + i * 17 });
     const p = game.player;
     p.isPlayer = false; // control experiment: 5 bots vs 5 bots
@@ -240,8 +254,8 @@ test('5v5 bot-vs-bot matches are not biased toward one side', () => {
   }
   const total = roundsA + roundsB;
   const aRate = roundsA / total;
-  assert.ok(total > 20, `expected a meaningful sample, got ${total} decided rounds`);
-  assert.ok(aRate > 0.3 && aRate < 0.7, `side bias too strong: A won ${(aRate * 100).toFixed(0)}% of ${total} rounds`);
+  assert.ok(total > 30, `expected a meaningful sample, got ${total} decided rounds`);
+  assert.ok(aRate > 0.35 && aRate < 0.65, `side bias too strong: A won ${(aRate * 100).toFixed(0)}% of ${total} rounds`);
 });
 
 test('a bot turns toward its target instead of away from it', () => {
@@ -266,4 +280,112 @@ test('a bot turns toward its target instead of away from it', () => {
   assert.ok(first > 0.05, `the duel should start off-target (start ${first.toFixed(3)} rad)`);
   assert.ok(last < first, `aim error must shrink (start ${first.toFixed(3)} rad, end ${last.toFixed(3)} rad)`);
   assert.ok(last < 0.35, `bot should end up roughly on target (error ${last.toFixed(3)} rad)`);
+});
+
+test('a bot walks its lane instead of ping-ponging on one waypoint', () => {
+  // Regression: ADVANCE used to re-path to the current lane waypoint every
+  // 1.2 s, which silently discarded every detour goal (cover, squad sweep,
+  // spawn hunt) and left bots walking back and forth over the same two metres.
+  const match = createMatch({ difficulty: 'normal' });
+  const rng = mulberry32(7);
+  const coord = createCoordinator();
+  // Control experiment: every actor is a bot, so nothing can block the spawn
+  // door except the AI itself.
+  for (const a of match.actors) a.brain = createBrain(a, match.profile, { rng, lane: 'mid' });
+  startMatch(match);
+  assignLanes(match, coord, rng);
+  updateMatch(match, 1 / 60);
+  const watched = match.actors.filter((a) => a.brain);
+  const startPos = new Map(watched.map((a) => [a.id, { x: a.x, z: a.z }]));
+  for (let i = 0; i < 60 * 20; i++) {
+    match.time += 1 / 60;
+    updateMatch(match, 1 / 60);
+    for (const b of match.actors) if (b.brain && b.alive) updateBot(match, b, 1 / 60, { grid, boxes: MAP_AABBS, coordinator: coord });
+  }
+  // Every bot must be out of its spawn slot, or at least have consumed a lane
+  // waypoint. A stuck queue in the spawn door leaves bots with lane index 0 and
+  // a metre of net movement for the whole round.
+  for (const bot of watched) {
+    const start = startPos.get(bot.id);
+    const displaced = Math.hypot(bot.x - start.x, bot.z - start.z);
+    assert.ok(
+      bot.brain.laneIndex > 0 || displaced > 6,
+      `${bot.name} is still in its spawn slot after 20 s (lane index ${bot.brain.laneIndex}, ${displaced.toFixed(1)} m from start)`,
+    );
+  }
+});
+
+test('a quiet 5v5 round still resolves instead of timing out', () => {
+  // Regression: both squads used to walk their lanes, stop, and camp opposite
+  // corners until the round time limit. Squad sweep must bring them together.
+  const stalls = [];
+  let decided = 0;
+  for (let i = 0; i < 8; i++) {
+    resetActorIds();
+    const game = createGame({ difficulty: 'normal', seed: 900 + i * 13 });
+    const p = game.player;
+    p.isPlayer = false;
+    p.brain = createBrain(p, game.match.profile, { rng: mulberry32(500 + i), lane: 'mid' });
+    let liveStart = 0;
+    let last = null;
+    let guard = 0;
+    while (game.match.phase !== PHASE.MATCH_END && guard++ < 60 * 60 * 8) {
+      updateGame(game, 1 / 60);
+      if (game.match.phase !== last) {
+        if (game.match.phase === PHASE.LIVE) liveStart = guard;
+        if (game.match.phase === PHASE.ROUND_END) {
+          decided++;
+          if ((guard - liveStart) / 60 >= 79.5) stalls.push((guard - liveStart) / 60);
+        }
+        last = game.match.phase;
+      }
+    }
+  }
+  assert.ok(decided >= 14, `expected a few rounds, got ${decided}`);
+  const stallRate = stalls.length / decided;
+  // Measured ~1-3% with the squad sweep in place; without it this jumped to ~26%,
+  // so 15% separates "occasionally someone camps hard" from "the AI camps" .
+  assert.ok(stallRate <= 0.15, `${(stallRate * 100).toFixed(0)}% of ${decided} rounds hit the time limit`);
+});
+
+test('seeded matches are deterministic', () => {
+  // Regression: weapon spread/recoil used Math.random(), so a seeded match was
+  // not reproducible and every balance number drifted between runs.
+  const play = (seed) => {
+    resetActorIds();
+    const game = createGame({ difficulty: 'normal', seed });
+    const p = game.player;
+    p.isPlayer = false;
+    p.brain = createBrain(p, game.match.profile, { rng: mulberry32(11), lane: 'mid' });
+    let guard = 0;
+    while (game.match.phase !== PHASE.MATCH_END && guard++ < 60 * 60 * 6) updateGame(game, 1 / 60);
+    return `${game.match.matchWinner}|${JSON.stringify(game.match.score)}|${game.match.round}|${game.match.actors.map((a) => a.kills).join(',')}`;
+  };
+  assert.equal(play(2024), play(2024), 'the same seed must produce the same match');
+  assert.notEqual(play(2024), play(2025), 'different seeds must produce different matches');
+});
+
+test('a bot pushed into a teammate separates instead of standing inside them', () => {
+  const match = createMatch({ difficulty: 'normal' });
+  const rng = mulberry32(3);
+  const coord = createCoordinator();
+  for (const a of match.actors) if (!a.isPlayer) a.brain = createBrain(a, match.profile, { rng, lane: 'mid' });
+  startMatch(match);
+  assignLanes(match, coord, rng);
+  updateMatch(match, 1 / 60);
+  const [a, b] = match.actors.filter((x) => x.team === 'A' && !x.isPlayer);
+  a.alive = true;
+  b.alive = true;
+  // Stack them exactly on top of each other and let the separation run.
+  a.x = 0;
+  a.z = 16;
+  b.x = 0.05;
+  b.z = 16;
+  for (let i = 0; i < 12; i++) {
+    match.time += 1 / 60;
+    updateBot(match, a, 1 / 60, { grid, boxes: MAP_AABBS, coordinator: coord });
+    updateBot(match, b, 1 / 60, { grid, boxes: MAP_AABBS, coordinator: coord });
+  }
+  const d = Math.hypot(a.x - b.x, a.z - b.z);
+  assert.ok(d > 0.8, `bots stayed inside each other (${d.toFixed(2)} m apart)`);
 });

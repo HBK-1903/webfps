@@ -185,7 +185,7 @@ export function updateGame(game, dtRaw) {
     }
 
     if (game.input.fire && game.player.alive) {
-      const shots = playerTryFire(game.pc, { actors: match.actors, boxes: MAP_AABBS });
+      const shots = playerTryFire(game.pc, { actors: match.actors, boxes: MAP_AABBS, rng: game.rng });
       for (const s of shots) {
         game.stats.shots += 1;
         addTracer(fx, s.origin, s.result.cast.point, s.result.cast.type);
@@ -210,8 +210,14 @@ export function updateGame(game, dtRaw) {
 
     // --- bots ---------------------------------------------------------
     refreshHuntZones(game.coordinator, game.grid, game.rng, match);
-    for (const bot of match.actors) {
-      if (!bot.brain || !bot.alive) continue;
+    // Alternate which team updates first: a fixed order would let ALFA react to
+    // BRAVO's new positions every tick while BRAVO sees stale ones, which shows
+    // up as a measurable side bias over thousands of ticks.
+    const bots = [];
+    for (const bot of match.actors) if (bot.brain && bot.alive) bots.push(bot);
+    const flip = match.actors.length > 0 && Math.floor(match.time * 60) % 2 === 0;
+    if (flip) bots.reverse();
+    for (const bot of bots) {
       updateBot(match, bot, dt, {
         grid: game.grid,
         boxes: MAP_AABBS,
