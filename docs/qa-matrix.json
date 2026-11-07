@@ -1,0 +1,68 @@
+[
+  {
+    "difficulty": "easy",
+    "mode": "idle",
+    "finished": 60,
+    "total": 60,
+    "aWinRate": 0.2833333333333333,
+    "avgRounds": 4.016666666666667,
+    "avgRoundTime": 40.63921161826583,
+    "stallRate": 0.12033195020746888,
+    "kd": 0
+  },
+  {
+    "difficulty": "easy",
+    "mode": "auto",
+    "finished": 60,
+    "total": 60,
+    "aWinRate": 0.7,
+    "avgRounds": 3.9833333333333334,
+    "avgRoundTime": 41.09414225942297,
+    "stallRate": 0.14225941422594143,
+    "kd": 4.468085106382978
+  },
+  {
+    "difficulty": "normal",
+    "mode": "idle",
+    "finished": 60,
+    "total": 60,
+    "aWinRate": 0.06666666666666667,
+    "avgRounds": 3.8,
+    "avgRoundTime": 28.587938596492908,
+    "stallRate": 0.03070175438596491,
+    "kd": 0
+  },
+  {
+    "difficulty": "normal",
+    "mode": "auto",
+    "finished": 60,
+    "total": 60,
+    "aWinRate": 0.5166666666666667,
+    "avgRounds": 4.25,
+    "avgRoundTime": 21.92307189542537,
+    "stallRate": 0.027450980392156862,
+    "kd": 2.3777777777777778
+  },
+  {
+    "difficulty": "hard",
+    "mode": "idle",
+    "finished": 60,
+    "total": 60,
+    "aWinRate": 0.15,
+    "avgRounds": 3.75,
+    "avgRoundTime": 20.23051851851808,
+    "stallRate": 0.0044444444444444444,
+    "kd": 0
+  },
+  {
+    "difficulty": "hard",
+    "mode": "auto",
+    "finished": 60,
+    "total": 60,
+    "aWinRate": 0.4,
+    "avgRounds": 4.083333333333333,
+    "avgRoundTime": 15.691904761904171,
+    "stallRate": 0,
+    "kd": 1.1088435374149659
+  }
+]

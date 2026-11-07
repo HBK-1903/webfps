@@ -1,0 +1,26 @@
+[
+  {
+    "screen": "Ana menü",
+    "violations": []
+  },
+  {
+    "screen": "Zorluk seçimi",
+    "violations": []
+  },
+  {
+    "screen": "Ayarlar",
+    "violations": []
+  },
+  {
+    "screen": "Kontroller",
+    "violations": []
+  },
+  {
+    "screen": "Duraklatma",
+    "violations": []
+  },
+  {
+    "screen": "Maç sonu",
+    "violations": []
+  }
+]

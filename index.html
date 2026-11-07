@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>SIFIR NOKTA — Taktik Eğitim Tesisi</title>
+    <link rel="stylesheet" href="./src/ui/styles.css" />
+    <link rel="stylesheet" href="./node_modules/lil-gui/dist/lil-gui.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="view" aria-label="Oyun görüntüsü" role="main"></canvas>
+
+      <!-- ===================== IN-GAME HUD ===================== -->
+      <div id="hud" class="hud hidden" aria-hidden="true" role="region" aria-label="Oyun bilgileri">
+        <div class="hud-top">
+          <div class="team-panel team-a">
+            <div class="team-name">ALFA</div>
+            <ul id="team-a-list" class="team-list"></ul>
+          </div>
+
+          <div class="score-block">
+            <div class="score-row">
+              <span id="score-a" class="score-score">0</span>
+              <span id="round-label" class="round-label">RAUND 1</span>
+              <span id="score-b" class="score-score">0</span>
+            </div>
+            <div class="pip-row">
+              <div id="pips-a" class="pips pips-a"></div>
+              <div id="round-timer" class="round-timer">00:00</div>
+              <div id="pips-b" class="pips pips-b"></div>
+            </div>
+            <div id="round-status" class="round-status">HAZIR</div>
+          </div>
+
+          <div class="team-panel team-b">
+            <div class="team-name">BRAVO</div>
+            <ul id="team-b-list" class="team-list"></ul>
+          </div>
+        </div>
+
+        <div id="banner" class="banner hidden" role="status" aria-live="polite"></div>
+
+        <ul id="killfeed" class="killfeed" role="log" aria-live="polite" aria-label="Eleme bildirimleri"></ul>
+
+        <div class="hud-bottom">
+          <div class="vitals">
+            <div class="vital health">
+              <span class="vital-icon" aria-hidden="true">✚</span>
+              <span id="health-value">100</span>
+              <div class="vital-bar"><i id="health-bar"></i></div>
+            </div>
+            <div class="vital armor">
+              <span class="vital-icon" aria-hidden="true">⛨</span>
+              <span id="armor-value">50</span>
+              <div class="vital-bar"><i id="armor-bar"></i></div>
+            </div>
+          </div>
+
+          <div class="crosshair-wrap">
+            <div id="crosshair" class="crosshair">
+              <i class="ch ch-top"></i>
+              <i class="ch ch-bottom"></i>
+              <i class="ch ch-left"></i>
+              <i class="ch ch-right"></i>
+              <span class="ch-dot"></span>
+            </div>
+            <div id="hitmarker" class="hitmarker"><i></i><i></i><i></i><i></i></div>
+            <div id="reload-ring" class="reload-ring hidden">
+              <svg viewBox="0 0 40 40" aria-hidden="true">
+                <circle class="rr-bg" cx="20" cy="20" r="17"></circle>
+                <circle id="rr-fg" class="rr-fg" cx="20" cy="20" r="17"></circle>
+              </svg>
+              <span>ŞARJÖR</span>
+            </div>
+          </div>
+
+          <div class="weapon">
+            <div id="weapon-name" class="weapon-name">AR-14 TÜFEK</div>
+            <div class="ammo-row">
+              <span id="ammo-mag" class="ammo-mag">30</span>
+              <span class="ammo-sep">/</span>
+              <span id="ammo-reserve" class="ammo-reserve">90</span>
+            </div>
+            <div class="slots">
+              <span class="slot" data-slot="pistol">1 K-7</span>
+              <span class="slot" data-slot="rifle">2 AR-14</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="damage-vignette" class="damage-vignette" aria-hidden="true"></div>
+        <div id="damage-dir" class="damage-dir" aria-hidden="true"></div>
+        <div id="death-overlay" class="death-overlay hidden">
+          <div class="death-title">ELENDİN</div>
+          <div id="death-sub" class="death-sub">Raund devam ediyor…</div>
+        </div>
+        <div id="fps" class="fps" aria-hidden="true">60 FPS</div>
+        <div id="difficulty-tag" class="difficulty-tag">NORMAL</div>
+      </div>
+
+      <!-- ===================== MAIN MENU ===================== -->
+      <div id="menu" class="screen menu-screen" role="region" aria-label="Ana menü">
+        <div class="menu-bg-grid" aria-hidden="true"></div>
+        <header class="menu-head">
+          <h1 class="title">SIFIR<span>NOKTA</span></h1>
+          <p class="subtitle">TAKTİK EĞİTİM TESİSİ — ÇEVRİMDIŞI 5v5</p>
+        </header>
+
+        <nav class="menu-nav" aria-label="Ana menü seçenekleri">
+          <button class="btn btn-primary" data-action="play">OYNA</button>
+          <button class="btn" data-action="settings">AYARLAR</button>
+          <button class="btn" data-action="controls">KONTROLLER</button>
+          <button class="btn" data-action="quit">ÇIKIŞ</button>
+        </nav>
+
+        <footer class="menu-foot">
+          <span id="build-tag">v0.9.0</span>
+          <span>Tek oyunculu · Botlara karşı · Dost ateşi kapalı</span>
+        </footer>
+      </div>
+
+      <!-- ===================== DIFFICULTY ===================== -->
+      <div id="difficulty-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="difficulty-title">
+        <div class="panel">
+          <h2 id="difficulty-title">ZORLUK SEÇ</h2>
+          <p class="panel-sub">Botların tepki süresi, nişan kalitesi ve takım uyumu değişir. Görüş hattı kuralları her seviyede aynıdır.</p>
+          <div class="difficulty-grid">
+            <button class="diff-card" data-difficulty="easy">
+              <span class="diff-name">KOLAY</span>
+              <span class="diff-desc">Yavaş tepki, geniş nişan hatası, seyrek koordinasyon.</span>
+            </button>
+            <button class="diff-card selected" data-difficulty="normal">
+              <span class="diff-name">NORMAL</span>
+              <span class="diff-desc">Dengeli görüş, tepki ve isabet.</span>
+            </button>
+            <button class="diff-card" data-difficulty="hard">
+              <span class="diff-name">ZOR</span>
+              <span class="diff-desc">Hızlı karar, daha iyi pozisyon ve takım desteği.</span>
+            </button>
+          </div>
+          <div class="panel-actions">
+            <button class="btn" data-action="menu">GERİ</button>
+            <button class="btn btn-primary" data-action="start-match">MAÇI BAŞLAT</button>
+          </div>
+          <p class="hint">5v5 · İlk 3 raundu alan kazanır · Raund içinde yeniden doğma yok</p>
+        </div>
+      </div>
+
+      <!-- ===================== SETTINGS ===================== -->
+      <div id="settings-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="panel wide">
+          <h2 id="settings-title">AYARLAR</h2>
+          <div class="settings-grid">
+            <label class="setting">
+              <span class="setting-label">FARE HASSASİYETİ <b id="sense-value">1.00</b></span>
+              <input id="sense" type="range" min="0.2" max="3" step="0.05" value="1" />
+            </label>
+            <label class="setting">
+              <span class="setting-label">SES DÜZEYİ <b id="volume-value">55%</b></span>
+              <input id="volume" type="range" min="0" max="1" step="0.05" value="0.55" />
+            </label>
+            <label class="setting">
+              <span class="setting-label">GÖRÜŞ AÇISI <b id="fov-value">78</b></span>
+              <input id="fov" type="range" min="65" max="100" step="1" value="78" />
+            </label>
+            <label class="setting">
+              <span class="setting-label">GRAFİK KALİTE</span>
+              <select id="quality">
+                <option value="low">Düşük</option>
+                <option value="medium">Orta</option>
+                <option value="high">Yüksek</option>
+              </select>
+            </label>
+            <label class="setting toggle">
+              <span class="setting-label">SİLAH SARSINTISI <b id="shake-value">AÇIK</b></span>
+              <input id="shake" type="checkbox" checked />
+            </label>
+          </div>
+          <div class="panel-actions">
+            <button class="btn" data-action="back">GERİ</button>
+            <button class="btn btn-primary" data-action="apply-settings">UYGULA</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== CONTROLS ===================== -->
+      <div id="controls-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="controls-title">
+        <div class="panel wide">
+          <h2 id="controls-title">KONTROLLER</h2>
+          <div class="controls-grid">
+            <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Hareket</span></div>
+            <div><kbd>Fare</kbd><span>Bakış</span></div>
+            <div><kbd>Sol tık</kbd><span>Ateş</span></div>
+            <div><kbd>Sağ tık</kbd><span>Nişan / yakınlaştırma</span></div>
+            <div><kbd>R</kbd><span>Yeniden doldur</span></div>
+            <div><kbd>1</kbd><kbd>2</kbd><span>Tabanca / Tüfek</span></div>
+            <div><kbd>Tekerlek</kbd><span>Silah değiştir</span></div>
+            <div><kbd>Shift</kbd><span>Koşma</span></div>
+            <div><kbd>Ctrl</kbd><span>Çömelme</span></div>
+            <div><kbd>Esc</kbd><span>Duraklat</span></div>
+          </div>
+          <div class="panel-actions">
+            <button class="btn btn-primary" data-action="back">GERİ</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== PAUSE ===================== -->
+      <div id="pause-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+        <div class="panel">
+          <h2 id="pause-title">DURAKLATILDI</h2>
+          <p class="panel-sub">Oyun zamanı, botlar ve ateş durduruldu.</p>
+          <div class="panel-actions column">
+            <button class="btn btn-primary" data-action="resume">DEVAM</button>
+            <button class="btn" data-action="pause-settings">AYARLAR</button>
+            <button class="btn" data-action="restart">YENİDEN BAŞLAT</button>
+            <button class="btn danger" data-action="menu">ANA MENÜYE DÖN</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== MATCH END ===================== -->
+      <div id="match-end-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="match-end-title">
+        <div class="panel">
+          <h2 id="match-end-title">MAÇ BİTTİ</h2>
+          <p id="match-end-score" class="panel-sub">3 - 1</p>
+          <div id="match-end-stats" class="match-stats"></div>
+          <div class="panel-actions column">
+            <button class="btn btn-primary" data-action="rematch">YENİDEN OYNA</button>
+            <button class="btn" data-action="menu">ANA MENÜ</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+      <div id="lock-hint" class="lock-hint hidden" role="status">Devam etmek için tıkla</div>
+    </div>
+
+    <!-- Dev mode resolves the bare "three" specifier; the production build
+         (npm run build) inlines everything into one offline HTML file. -->
+    <script type="importmap">
+      { "imports": { "three": "./node_modules/three/build/three.module.js" } }
+    </script>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
