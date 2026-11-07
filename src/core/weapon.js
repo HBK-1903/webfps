@@ -146,7 +146,10 @@ export function tryShoot(w, { aimPitch = 0, aimYaw = 0, moving = false, ads = fa
   w.triggerHeld = true;
   w.shotsFired += 1;
   w.spread = Math.min(sp.max, w.spread + sp.perShot);
-  w.recoilPitch += w.def.recoil.pitch * (ads ? 0.75 : 1);
+  // Recoil accumulates through a burst and is drained by the controller
+  // (`updateWeapon`/`absorbRecoil`). It used to be *set* here and then zeroed
+  // after a single read, so a burst had exactly the climb of one shot.
+  w.recoilPitch = Math.min(8, w.recoilPitch + w.def.recoil.pitch * (ads ? 0.75 : 1));
   w.recoilYaw += (rng() * 2 - 1) * w.def.recoil.yaw;
   return {
     weaponId: w.id,

@@ -691,6 +691,11 @@ function renderGame(dt) {
   const eye = eyePoint(game.player);
 
   // Camera: yaw/pitch from the controller plus a gentle bob and a small kick.
+  //
+  // The bob is a *cosmetic* offset applied after the aim direction is fixed, so
+  // it must not move the crosshair relative to the world. It is tiny (1.8 cm)
+  // and at 20 m that is still ~0.05 deg, so the reticle stays honest; the
+  // recoil kick is the larger one and is deliberately visible.
   const bob = Math.sin(game.pc.bobPhase) * 0.018 * game.player.speedFactor;
   camera.position.set(eye.x, eye.y + bob, eye.z);
   const kick = (game.pc.kickPitch * Math.PI) / 180;

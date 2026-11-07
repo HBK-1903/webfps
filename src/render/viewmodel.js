@@ -64,7 +64,24 @@ function muzzleFlash() {
 
 // Hip and ADS anchors, blended per frame (module scope: applyPose needs them).
 const HIP = new THREE.Vector3(0.19, -0.19, -0.42);
-const ADS = new THREE.Vector3(0.0, -0.115, -0.3);
+
+/**
+ * How high the sights sit above the gun's origin, per weapon. Measured from the
+ * geometry below (rifle sights and pistol slide top both sit at +0.075).
+ *
+ * This number is the whole point of ADS: the sight must end up exactly on the
+ * camera axis, or the reticle promises a shot the bullets will not take.
+ * It used to be a hand-tuned -0.115, which left the sights 4-6 cm *below* the
+ * centre of the screen - about 1.2 m of miss at 30 m.
+ */
+// Pistol: the single sight blade on the slide top (0.038), not the rifle's rail.
+const SIGHT_HEIGHT = { rifle: 0.075, pistol: 0.038 };
+
+/** ADS position that puts the iron sights dead centre for a given weapon. */
+function adsPosition(id) {
+  const y = -(SIGHT_HEIGHT[id] ?? 0.075);
+  return new THREE.Vector3(0, y, -0.3);
+}
 
 export function createViewModel(camera) {
   const root = new THREE.Group();
@@ -131,10 +148,10 @@ export function applyPose(state, { speedFactor, adsBlend, dt, sprinting }) {
   state.adsBlend += (adsBlend - state.adsBlend) * Math.min(1, 14 * dt);
   const w = state.current === 'rifle' ? state.rifle : state.pistol;
   const hip = HIP.clone();
-  const ads = ADS.clone();
+  const ads = adsPosition(state.current);
   if (state.current === 'pistol') {
     hip.set(0.16, -0.17, -0.4);
-    ads.set(0, -0.1, -0.34);
+    ads.z = -0.34;
   }
   const target = hip.clone().lerp(ads, state.adsBlend);
   // Sprint lowers the weapon so it doesn't block the view.

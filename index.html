@@ -53,6 +53,28 @@
 
         <div id="banner" class="banner hidden" role="status" aria-live="polite"></div>
 
+        <!-- Reticle: pinned to the centre of the viewport, which is where the
+             camera looks and where the bullets go. It used to live inside the
+             bottom HUD row, so it sat off-centre by the width difference
+             between the vitals and the ammo panels. -->
+        <div class="reticle-layer" aria-hidden="true">
+          <div id="crosshair" class="crosshair">
+            <i class="ch ch-top"></i>
+            <i class="ch ch-bottom"></i>
+            <i class="ch ch-left"></i>
+            <i class="ch ch-right"></i>
+            <span class="ch-dot"></span>
+          </div>
+          <div id="hitmarker" class="hitmarker"><i></i><i></i><i></i><i></i></div>
+          <div id="reload-ring" class="reload-ring hidden">
+            <svg viewBox="0 0 40 40" aria-hidden="true">
+              <circle class="rr-bg" cx="20" cy="20" r="17"></circle>
+              <circle id="rr-fg" class="rr-fg" cx="20" cy="20" r="17"></circle>
+            </svg>
+            <span>ŞARJÖR</span>
+          </div>
+        </div>
+
         <ul id="killfeed" class="killfeed" role="log" aria-live="polite" aria-label="Eleme bildirimleri"></ul>
 
         <div class="hud-bottom">
@@ -69,23 +91,6 @@
             </div>
           </div>
 
-          <div class="crosshair-wrap">
-            <div id="crosshair" class="crosshair">
-              <i class="ch ch-top"></i>
-              <i class="ch ch-bottom"></i>
-              <i class="ch ch-left"></i>
-              <i class="ch ch-right"></i>
-              <span class="ch-dot"></span>
-            </div>
-            <div id="hitmarker" class="hitmarker"><i></i><i></i><i></i><i></i></div>
-            <div id="reload-ring" class="reload-ring hidden">
-              <svg viewBox="0 0 40 40" aria-hidden="true">
-                <circle class="rr-bg" cx="20" cy="20" r="17"></circle>
-                <circle id="rr-fg" class="rr-fg" cx="20" cy="20" r="17"></circle>
-              </svg>
-              <span>ŞARJÖR</span>
-            </div>
-          </div>
 
           <div class="weapon">
             <div id="weapon-name" class="weapon-name">AR-14 TÜFEK</div>

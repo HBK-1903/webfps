@@ -4,6 +4,7 @@
 //
 //   node tools/matrix.mjs [--matches N] [--json]
 
+import { eyePoint } from '../src/core/actor.js';
 import { createGame, updateGame } from '../src/core/game.js';
 import { resetActorIds } from '../src/core/actor.js';
 import { PHASE } from '../src/core/match.js';
@@ -43,7 +44,14 @@ function playMatch(difficulty, seed, playerMode) {
           }
         }
         game.pc.yaw = Math.atan2(best.x - p.x, -(best.z - p.z));
-        game.pc.pitch = 0;
+        // Aim at the target's chest, not at the horizon. With pitch=0 this
+        // harness only hits the legs of anyone standing on another platform,
+        // and it stopped being a fair proxy once bots started aiming at the
+        // body: it was measuring the harness's blind spot, not the game.
+        const eyeY = eyePoint(p).y;
+        const dx = best.x - p.x;
+        const dz = best.z - p.z;
+        game.pc.pitch = Math.atan2(1.15 - eyeY, Math.hypot(dx, dz));
         game.input.fire = bd < 45;
       } else {
         game.input.fire = false;

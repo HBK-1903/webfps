@@ -86,7 +86,7 @@ Kod imzalama sertifikası olmadığı için Windows ilk çalıştırmada SmartSc
 
 ### Testler ve kalite kapısı
 ```bash
-npm test             # 103 test, tamamı headless (Node + jsdom)
+npm test             # 115 test, tamamı headless (Node + jsdom)
 npm run lint         # ESLint (gerçek hata odaklı kural seti)
 npm run verify       # lint + test + build — tek komutta tam doğrulama
 npm run qa           # scripted playtest → docs/QA-REPORT.md
@@ -116,6 +116,15 @@ Ayarlar: fare hassasiyeti, ses düzeyi, görüş açısı (FOV), grafik kalite, 
 Hepsi `localStorage`'da saklanır ve yeniden açılışta korunur.
 
 ---
+
+### Nişangah ve nişan hattı (bu sürümde düzeltildi)
+
+| Sorun | Etki | Düzeltme |
+|---|---|---|
+| Nişangah HUD'un alt satırının içindeydi | Merkezden **16 px** kayık (1600 px'te) ve mermi hacmiyle değişiyordu | Ayrı `reticle-layer`, tam ekran merkezinde |
+| ADS nişangahı kamera ekseninde değildi | Arpacık **4–6 cm** altta; 30 m'de 1 m'den fazla sapma | ADS konumu nişangah yüksekliğinden hesaplanıyor, ölçülü test var |
+| Geri tepme her atışta sıfırlanıyordu | 7 atışlık seri, tek atış kadar tırmanıyordu | Tepme birikiyor, sönümleniyor, atışa *ve* kameraya yansıyor |
+| Botlar göz noktasına nişan alıyordu | Her isabet kafa (×2.5) | Gövde nişanı + zorluğa bağlı yukarı kayma |
 
 ## 3. Tamamlanan özellikler (MVP)
 
@@ -147,6 +156,11 @@ Hepsi `localStorage`'da saklanır ve yeniden açılışta korunur.
 | Menzil / düşüş | 70 m, %60 taban | 110 m, %60 taban |
 
 - Hasar düşüşü, kafa çarpanı ×2.5, zırh hasarın **%50'sini** emer (asla bağışıklık değil), dost ateşi kapalı.
+- **Vuruş hacimleri üst üste binmez.** Gövde silindiri kafa küresinin *altında* biter. Eskiden
+  gövde 1.36'ya, kafa 1.33'e kadar uzanıyordu; üst göğüse nişan alan her atış "kafa" sayılıyordu.
+- **Botlar gövdeye nişan alır, kafaya değil.** Eskiden nişan noktası göz noktasıydı (kafa küresinin
+  içinde): 4–34 m arası her atış kafa vuruşuydu ve normal bir bot oyuncuyu ~0.3 s'de öldürüyordu.
+  Artık taban gövde, zorluk yükseldikçe nişan yukarı kayar (kolay gövde, zor üst göğüs/çene hattı).
 - Reload / silah değiştirme / ölüm / raund sonu kuralları tutarlı: reload iptali, boş şarjörde otomatik reload,
   ölümde ve raund sonunda kontroller susar.
 - Vuruş geri bildirimi: hitmarker (öldürmede kırmızı), kafa isabeti sesi farklı, kan/gore yok.
@@ -213,7 +227,7 @@ src/
     scene.js  actorRigs.js  viewmodel.js  fx.js
   ui/                   # HUD, ses, ayarlar (localStorage)
   main.js               # uygulama kabuğu: menü akışı, input, pointer lock, render döngüsü
-tests/                  # 103 test (core, AI, HUD, PWA, e2e app boot)
+tests/                  # 115 test (core, AI, nişan, HUD, PWA, e2e app boot)
 tools/serve.mjs         # dev sunucusu
 tools/sim.mjs           # headless maç simülatörü
 build.mjs               # tek dosya offline build
@@ -226,7 +240,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 
 ## 5. Test raporu
 
-`npm test` → **103/103 geçti** (Node 22 + jsdom, headless):
+`npm test` → **115/115 geçti** (Node 22 + jsdom, headless):
 
 | Dosya | Kapsam |
 |---|---|
@@ -236,6 +250,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 | `tests/nav.test.js` (11) | Yürünebilirlik, spawn simetrisi ve güvenliği, A* erişilebilirliği, tünelleme yok, LOS, ray-cast |
 | `tests/ai.test.js` (22) | Duvar arkasını görmeme, FOV konisi, zorluk farkı (ölçülmüş tepki/isabet), son bilinen konum, işitme gürültüsü, boş şarjörle ateş etmeme, harita dışına çıkmama, yığılmama, lane yürüyüşü (spawn'da kilitlenmeme), sessiz raundun çözülmesi (tıkanma bütçesi), tohumlu maç tekrarlanabilirliği (determinizm), takım arkadaşıyla ayrışma, siper noktalarının simetrisi + gerçekten saklaması, yaralı botun sipere gidip çömelmesi, siperin tek taraflı olması, yardım çağrısı ve **düşman konumu sızdırmaması** |
 | `tests/packaging.test.js` (7) | Electron config'i (appId, hedefler, dosya listesi) parse edilip doğrulanır; renderer güvenliği (`contextIsolation`/`sandbox`/`nodeIntegration`), in-game çıkış köprüsü, PWA manifest + maskable ikon, service worker sürümleme/temizlik ve `file://`'de sessizce devre dışı kalma |
+| `tests/aim.test.js` (12) | Nişangahın tam ekran merkezinde olması, ADS'in gerçekten kamera eksenine oturması, kafa/gövde hacimlerinin kesişmemesi, botların gövdeye nişan alıp zorlukla yükselmesi, geri tepmenin seri boyunca birikmesi, şerit dağılımının oyuncunun hangi slotta olduğundan bağımsız olması |
 | `tests/integration.test.js` (11) | 3 zorlukta tam maç bitişi, geri sayımda hasar/ateş kilidi, ölüyken ateş, dost ateşi, kafa isabeti, duraklatma dondurması, restart temizliği, HUD durumu, hassasiyet etkisi |
 | `tests/ui.test.js` (5) | Gerçek HTML + gerçek HUD bağlaması, reload/boş şarjör, raund sonucu, ayar doğrulama/kalıcılık, tüm kontrol ID'leri |
 | `tests/integration.test.js` (14) | + canlı zorluk değişimi, paylaşılan nav grid, `gameSnapshot` sözleşmesi |
@@ -252,10 +267,10 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
   zor botlar bile atışlarının çoğunu kaçırıyor (LOS + nişan hatası gerçekten çalışıyor).
 
 **`npm run matrix`** (denge matrisi, **60 maç/hücre** → `docs/qa-matrix.json`):
-oyuncunun takımının kazanma oranı — kolayda otomatik oyuncuyla %70, normalde %52, zorda %40; hareketsiz
-(idle) oyuncuyla kolayda %28, normalde %7, zorda %15. Zorluk kademesi monoton ve ölçülebilir: zor botlar
-otomatik oyuncuyu %40'a düşürüyor. Ortalama raund süreleri kolay 41 s, normal 22–29 s, zor 16–20 s;
-**tıkanan raund oranı kolay %12–14, normal %3, zor %0** (hedef <%25).
+oyuncunun takımının kazanma oranı — kolayda otomatik oyuncuyla %43, normalde %40, zorda %30; hareketsiz
+(idle) oyuncuyla kolayda %25, normalde %10, zorda %15. Zorluk kademeleri monoton ve ölçülebilir.
+Ortalama raund süreleri kolay 43 s, normal 24–31 s, zor 17–23 s; **tıkanan raund oranı kolay %14,
+normal %6, zor %0–1** (hedef <%25).
 
 **Tarafsızlık (side bias) testi:** harita 180° dönel simetrik; 5v5 saf bot maçlarında (10 tohumlu maç,
 42 karara bağlanmış raund) ALFA 23 / BRAVO 19 raund kazandı (%54.8 / %45.2). Test tohumlu (seeded) olduğu için bu sayı
@@ -419,7 +434,7 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 103 headless test |
+| `npm test` | 115 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
 | `npm run verify` | lint + test + a11y + build |

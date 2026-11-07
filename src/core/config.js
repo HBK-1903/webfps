@@ -115,6 +115,8 @@ export const DIFFICULTY = {
     fireAngleTolerance: 4.5, // degrees
     burstShots: 3,
     burstPause: 0.5,
+    recoilAimKick: 0.3, // degrees of climb added per shot inside a burst
+    headBias: 0.22, // 0 = chest, 1 = head centre
     fov: 112,
     viewDistance: 38,
     hearingRadius: 16,
@@ -138,6 +140,8 @@ export const DIFFICULTY = {
     fireAngleTolerance: 2.6,
     burstShots: 4,
     burstPause: 0.38,
+    recoilAimKick: 0.2,
+    headBias: 0.7,
     fov: 118,
     viewDistance: 44,
     hearingRadius: 18,
@@ -160,6 +164,8 @@ export const DIFFICULTY = {
     fireAngleTolerance: 1.6,
     burstShots: 7,
     burstPause: 0.24,
+    recoilAimKick: 0.05,
+    headBias: 0.8,
     fov: 135,
     viewDistance: 60,
     hearingRadius: 24,

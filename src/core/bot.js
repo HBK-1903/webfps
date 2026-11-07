@@ -40,6 +40,7 @@ export function createBrain(actor, profile, { rng = Math.random, lane = 'mid' } 
     aimErrorYaw: 0,
     aimErrorPitch: 0,
     aimErrorNext: 0,
+    recoilAccum: 0,
     // navigation
     path: [],
     pathGoal: null,
@@ -309,6 +310,32 @@ function wrapAngle(a) {
   return r;
 }
 
+/**
+ * Where a bot aims on an enemy's body.
+ *
+ * Bots used to aim at the *eye* point, which is inside the head sphere: every
+ * single shot at any range was a headshot (measured: 7/7 at 4-34 m), so a
+ * normal bot killed the player with ~0.3 s of contact. Aiming at the chest is
+ * what a human does; the difficulty then decides how far up the aim creeps.
+ * The head is still reachable, it just has to be earned.
+ */
+export function aimPoint(bot, target) {
+  const profile = bot.brain ? bot.brain.profile : null;
+  // 0 = middle of the chest, 1 = head centre. Bots start at the body and settle
+  // a little higher as their aim ramps up, but the difficulty decides the rest.
+  const base = profile ? headBias(profile) : 0.2;
+  const bias = Math.min(1, base + 0.2 * base * (bot.brain ? bot.brain.aimRamp : 0));
+  // Actors have no y field: they stand on the floor, so heights are absolute.
+  const eyeY = eyePoint(target).y;
+  const chestY = target.crouch > 0.5 ? 0.78 : 1.12;
+  return { x: target.x, y: chestY + (eyeY - chestY) * bias, z: target.z };
+}
+
+/** How far up the body the profile aims, before aim-ramp (0 = chest, 1 = head). */
+function headBias(profile) {
+  return Math.max(0, Math.min(1, profile.headBias ?? 0.2));
+}
+
 /** Can `bot` see `target`? FOV cone + world LOS. No knowledge of unseen actors. */
 export function canSee(bot, target, boxes) {
   if (!target.alive || target.team === bot.team) return false;
@@ -464,8 +491,10 @@ function combatTick(match, bot, dt, ctx) {
   }
   const a = bot;
   const eye = eyePoint(a);
-  const tEye = eyePoint(target);
-  const angles = anglesTo(eye, tEye);
+  const angles = anglesTo(eye, aimPoint(a, target));
+
+  // Recoil climb decays between bursts (and inside long pauses).
+  brain.recoilAccum = Math.max(0, (brain.recoilAccum || 0) - profile.recoilAimKick * 2.6 * dt);
 
   // Aim error: persistent offset that drifts, shrinking as the bot keeps track.
   brain.aimErrorNext -= dt;
@@ -510,19 +539,31 @@ function combatTick(match, bot, dt, ctx) {
     Math.abs(angles.pitch - a.pitch) * (180 / Math.PI);
   const ready = brain.reactionTimer <= 0 && brain.aimRamp > 0.25;
   const aligned = aimErrorDeg < profile.fireAngleTolerance + (1 - brain.aimRamp) * profile.aimError;
-  if (brain.burstLeft <= 0 && brain.burstPause <= 0) brain.burstLeft = profile.burstShots;
+  if (brain.burstLeft <= 0 && brain.burstPause <= 0) {
+    brain.burstLeft = profile.burstShots;
+  }
 
   if (ready && aligned && brain.burstPause <= 0 && brain.burstLeft > 0) {
+    // Recoil throws the rounds off the aim line. Without this a burst stays
+    // pixel-accurate and every burst is a guaranteed headshot chain; the climb
+    // is what makes bursts a trade-off instead of a free kill.
+    const recoilKick = brain.recoilAccum || 0;
     const shot = tryShoot(w, {
-      aimPitch: a.pitch,
+      aimPitch: a.pitch + recoilKick * (Math.PI / 180),
       aimYaw: a.yaw,
-      moving: a.speedFactor > 0.3,
-      ads: true,
+      moving: bot.speedFactor > 0.3,
+      ads: brain.aimRamp > 0.5,
       triggerHeld: w.triggerHeld,
       rng: brain.rng,
     });
     if (shot) {
       brain.shots++;
+      // Climb through the burst: each round leaves a little higher than the
+      // last, and it decays back down between bursts (see combatTick). This is
+      // what stops a burst from being four guaranteed headshots.
+      brain.recoilAccum = Math.min(profile.recoilAimKick * 3,
+        (brain.recoilAccum || 0) + profile.recoilAimKick);
+      w.recoilPitch = 0; // the bot owns its climb; do not let it pile up here
       const dir = directionFromAngles(shot.yaw, shot.pitch);
       const result = performShot({ attacker: a, origin: eye, dir, actors: match.actors, boxes: ctx.boxes, weapon: w.def });
       if (result.hit) {
