@@ -38,7 +38,7 @@ npm run build        # -> dist/SifirNokta.html  (tek dosya, her şey gömülü)
 
 ### Testler ve kalite kapısı
 ```bash
-npm test             # 89 test, tamamı headless (Node + jsdom)
+npm test             # 95 test, tamamı headless (Node + jsdom)
 npm run lint         # ESLint (gerçek hata odaklı kural seti)
 npm run verify       # lint + test + build — tek komutta tam doğrulama
 npm run qa           # scripted playtest → docs/QA-REPORT.md
@@ -61,7 +61,7 @@ npm run sim -- normal 7 3   # zorluk, seed, maç sayısı ile headless maç sim�
 | `Ctrl` | Çömelme |
 | `Esc` | Duraklat / devam |
 | `F2` | Denge ayar paneli — can/zırh/kafa çarpanı, bot nişan hatası, silah hasarı/atış hızı canlı ayarlanır |
-| `F3` | Hata ayıklama katmanı (bot durumları, şeritler, konumlar, zamanlar) |
+| `F3` | Hata ayıklama katmanı (bot durumları, şeritler, konumlar, siper/çömelik/destek etiketleri, hedefler) |
 | Pencere odağı kaybı | Otomatik duraklatma (input ve botlar durur) |
 
 Ayarlar: fare hassasiyeti, ses düzeyi, görüş açısı (FOV), grafik kalite, silah sarsıntısı açık/kapalı.
@@ -109,6 +109,13 @@ Hepsi `localStorage`'da saklanır ve yeniden açılışta korunur.
 - A* ızgara navigasyonu, 3 şerit (orta/kuzey/güney), takım arkadaşları arasında şerit dağıtımı,
   paylaşılan arama bölgesi (yığılma yerine yayılma), takım süpürmesi, sıkışma tespiti + yeniden yol bulma.
 - Gövde çakışması çözülür (tek yönlü itme): botlar birbirinin içine girmez, kapılardan sırayla geçer.
+- **Siper:** `src/core/cover.js` haritadaki 56 kutudan 156 aday siper noktası üretir; her nokta gerçek
+  bir raycast ile doğrulanır (çömelmiş gövde o yönden gerçekten görünmüyor mu?). Botlar yaralandığında
+  veya şarjörü bittiğinde en yakın uygun sipere gider, çömelir, kısa aralıklarla başını kaldırıp ateş eder
+  ve süre bitince (en fazla ~3 s) tekrar saldırıya döner. Takım arkadaşları aynı noktayı "kapar", kimse
+  aynı sandığın arkasına yığılmaz.
+- **Destek:** vurulan bir bot takım arkadaşlarına haber verir (yalnızca *kendi* konumu — asla düşmanın
+  konumu). 14 m içindeki, o anda çatışmada olmayan arkadaşlar yardıma gider; zorluk arttıkça tepki oranı artar.
 - Durumlar: spawn → advance → engage → investigate → reload → retreat → hold.
 - Detour hedefleri (siper, süpürme, kovalama) süreli kilit ile korunur; bot iki nokta arasında gidip gelmez.
 - Silah yönetimi: boş şarjörde asla ateş etmez, reload eder, gerekirse tabancaya geçer.
@@ -141,6 +148,7 @@ Hepsi `localStorage`'da saklanır ve yeniden açılışta korunur.
 ```
 src/
   core/                 # Oyun mantığı — DOM/WebGL bilmez, saf ve test edilebilir
+  core/cover.js         # Haritadan türetilen siper noktaları (raycast doğrulamalı)
     config.js           # TÜM denge verisi (silah, zorluk, maç, oyuncu, varsayılan ayarlar)
     damage.js           # saf hasar/zırh formülü (oyuncu ve botlar aynı fonksiyonu kullanır)
     map.js              # simetrik harita, spawn ve rota noktaları
@@ -157,7 +165,7 @@ src/
     scene.js  actorRigs.js  viewmodel.js  fx.js
   ui/                   # HUD, ses, ayarlar (localStorage)
   main.js               # uygulama kabuğu: menü akışı, input, pointer lock, render döngüsü
-tests/                  # 89 test (core, AI, HUD, e2e app boot)
+tests/                  # 95 test (core, AI, HUD, e2e app boot)
 tools/serve.mjs         # dev sunucusu
 tools/sim.mjs           # headless maç simülatörü
 build.mjs               # tek dosya offline build
@@ -170,7 +178,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 
 ## 5. Test raporu
 
-`npm test` → **89/89 geçti** (Node 22 + jsdom, headless):
+`npm test` → **95/95 geçti** (Node 22 + jsdom, headless):
 
 | Dosya | Kapsam |
 |---|---|
@@ -178,7 +186,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 | `tests/weapons.test.js` (12) | Ateş hızı, tek/otomatik tetik, boş şarjör, reload transferi/iptali, ateş kilidi, geri tepme birikmesi/toparlanması, yayılma |
 | `tests/match.test.js` (11) | 5v5 kurulum, geri sayım, eleme ile raund sonu, çift tetiklenmeme, raund reseti (can/zırh/ammo/pozisyon), ilk-3 zafer, beraberlik, tıkanma kararı, maç sonu dondurma |
 | `tests/nav.test.js` (11) | Yürünebilirlik, spawn simetrisi ve güvenliği, A* erişilebilirliği, tünelleme yok, LOS, ray-cast |
-| `tests/ai.test.js` (16) | Duvar arkasını görmeme, FOV konisi, zorluk farkı (ölçülmüş tepki/isabet), son bilinen konum, işitme gürültüsü, boş şarjörle ateş etmeme, harita dışına çıkmama, yığılmama, lane yürüyüşü (spawn'da kilitlenmeme), sessiz raundun çözülmesi (tıkanma bütçesi), tohumlu maç tekrarlanabilirliği (determinizm), takım arkadaşıyla ayrışma |
+| `tests/ai.test.js` (22) | Duvar arkasını görmeme, FOV konisi, zorluk farkı (ölçülmüş tepki/isabet), son bilinen konum, işitme gürültüsü, boş şarjörle ateş etmeme, harita dışına çıkmama, yığılmama, lane yürüyüşü (spawn'da kilitlenmeme), sessiz raundun çözülmesi (tıkanma bütçesi), tohumlu maç tekrarlanabilirliği (determinizm), takım arkadaşıyla ayrışma, siper noktalarının simetrisi + gerçekten saklaması, yaralı botun sipere gidip çömelmesi, siperin tek taraflı olması, yardım çağrısı ve **düşman konumu sızdırmaması** |
 | `tests/integration.test.js` (11) | 3 zorlukta tam maç bitişi, geri sayımda hasar/ateş kilidi, ölüyken ateş, dost ateşi, kafa isabeti, duraklatma dondurması, restart temizliği, HUD durumu, hassasiyet etkisi |
 | `tests/ui.test.js` (5) | Gerçek HTML + gerçek HUD bağlaması, reload/boş şarjör, raund sonucu, ayar doğrulama/kalıcılık, tüm kontrol ID'leri |
 | `tests/integration.test.js` (14) | + canlı zorluk değişimi, paylaşılan nav grid, `gameSnapshot` sözleşmesi |
@@ -195,11 +203,10 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
   zor botlar bile atışlarının çoğunu kaçırıyor (LOS + nişan hatası gerçekten çalışıyor).
 
 **`npm run matrix`** (denge matrisi, **60 maç/hücre** → `docs/qa-matrix.json`):
-oyuncunun takımının kazanma oranı — kolayda otomatik oyuncuyla %75, normalde %62, zorda %47; hareketsiz
-(idle) oyuncuyla kolayda %23, normalde %8, zorda %8. Zorluk kademeleri arasında gerçek bir fark var ve
-sıra tutarlı: hareketsiz oyuncu her kademede kaybediyor, zor botlar otomatik oyuncuyu bile %50'nin altına
-çekiyor. Ortalama raund süreleri kolay 28–29 s, normal 17–25 s, zor 14–18 s; **tıkanan raund oranı %0–3**
-(hedef <%25).
+oyuncunun takımının kazanma oranı — kolayda otomatik oyuncuyla %70, normalde %52, zorda %40; hareketsiz
+(idle) oyuncuyla kolayda %28, normalde %7, zorda %15. Zorluk kademesi monoton ve ölçülebilir: zor botlar
+otomatik oyuncuyu %40'a düşürüyor. Ortalama raund süreleri kolay 41 s, normal 22–29 s, zor 16–20 s;
+**tıkanan raund oranı kolay %12–14, normal %3, zor %0** (hedef <%25).
 
 **Tarafsızlık (side bias) testi:** harita 180° dönel simetrik; 5v5 saf bot maçlarında (10 tohumlu maç,
 42 karara bağlanmış raund) ALFA 23 / BRAVO 19 raund kazandı (%54.8 / %45.2). Test tohumlu (seeded) olduğu için bu sayı
@@ -246,10 +253,12 @@ Oynanış sizin tarafınızda önizlemede/`dist` dosyasında doğrulanmalı.
   veya `launcher` betikleri (bir tarayıcı gerektirir; Chrome/Edge önerilir).
 - Görsel/piksel doğrulama bu ortamda yapılamadı (WebGL yok). Sahne, kamera yönleri ve HUD mantığı
   testlerle doğrulandı; **görsel his** sizin tarafınızda kontrol edilmeli.
-- Bot AI, şartnamedeki davranış listesinin stabil bir alt kümesidir. **Yok:** explicit cover-noktaları
-  (sipere bilinçli yerleşme), takım arkadaşını canlı destekleme/revive, el bombası, sesle yön tayini
-  yapan gelişmiş işitme modeli. `BotBrain` yeni durumlar eklemeye uygun ayrılmıştır.
-- Botlar birbirine taktiksel olarak "siper ol" diyemez; koordinasyon paylaşılan temas + arama bölgesi düzeyinde.
+- Bot AI, şartnamedeki davranış listesinin stabil bir alt kümesidir. **Var:** haritadan türetilen siper
+  noktaları (gerçek raycast ile doğrulanmış), çömelip siperden bakma/ateş etme, yaralı takım arkadaşına
+  yakın destek. **Yok:** canlandırma/revive, el bombası, sesle yön tayini yapan gelişmiş işitme modeli.
+  `BotBrain` yeni durumlar eklemeye uygun ayrılmıştır.
+- Destekleme *yakın* bir reflekstir (14 m içi); bot haritanın öbür ucundaki arkadaşına koşmaz. Bu bilinçli
+  bir karar: denendiğinde oyuncunun takımını zayıflatıyordu (bkz. §7c).
 - Görsel kalite "yüksek" ayarında gölge açılır; entegre GPU'larda FPS düşebilir (kalite ayarı düşürülebilir).
 - Ses sentetik olduğu için gerçek silah kayıtları kadar zengin değil.
 - Pointer lock tarayıcı tarafından Esc ile bırakılırsa oyun otomatik duraklar (tarayıcı davranışı).
@@ -294,6 +303,34 @@ kendi harita bilgilerini doğru kullanmalarını sağladı.
 
 ---
 
+## 7c. Siper ve takım desteği: ne denendi, ne işe yaradı
+
+Bu iki davranış eklenirken üç kez geri alınan yaklaşım oldu; ölçümler olmadan fark edilmeyecek bir
+denge tuzağı var, o yüzden buraya yazıyorum.
+
+| Deneme | Sonuç (60 maç/hücre matris) | Karar |
+|---|---|---|
+| Siper `ENGAGE` durumundan `return` ediyordu | Botlar çatışmayı tamamen bıraktı; zorluk sırası bozuldu (kolay %97 kazanma) | **Reddedildi** — siper bir *duruş*, ayrı bir durum değil |
+| Siper her temasta tetikleniyordu | Sağlıklı botlar da saklandı, tıkanan raund %2 → %28 | **Reddedildi** — yalnızca yaralı/şarjörsüz bot sipere girer |
+| Destek: harita çapında yardıma koşma | Botlar kendi lane'ini bıraktı, takım zayıfladı (normal auto %52 → %90) | **Reddedildi** — destek 14 m içi, ileri yönlü, bekleme süreli |
+| Destek: yakın + yalnızca boştayken + soğuma | Etki nötr (istatistiksel olarak ayrışmadı) | **Kabul** — davranış var, dengeyi bozmuyor |
+| Siper: yaralıyken, en fazla ~3 s, peek/hide döngüsü, nokta paylaşımı | Kolayda tıkanma %2 → %10, normal %0 → %3, zor %1 | **Kabul** |
+
+Ölçülen son durum (60 maç/hücre, 360 maç): kazanma oranı kolay **%70** → normal **%52** → zor **%40**
+(otomatik oyuncu); tıkanan raund kolay %12–14, normal %3, zor %0. Taraf dengesi 40 tohumlu 5v5
+bot-vs-bot maçında **%50.9 / %49.1**.
+
+İki teknik not, ikisi de hata ayıklarken ortaya çıktı:
+
+1. **Siper noktaları ızgaraya oturtulurken simetri bozuluyordu.** Navigasyon ızgarasında x=0'da hücre
+   merkezi yok (ızgara `-31..31`, hücre 1 m), bu yüzden ayna eksenindeki bir nokta hep +0.5'e kayıyor ve
+   siper listesi asimetrik hâle geliyordu (76/156 noktanın aynası kayıp). Çözüm: her nokta aynasıyla
+   **çift** olarak ele alınıyor; biri oturtulamıyorsa ikisi birden düşüyor. Sonuç: 62 nokta, tam simetrik.
+2. **`followPath` boş yolda "vardı" dönüyor.** Siper mantığı bunu "siperdeyim" sanıp noktayı 5 m
+   uzaktayken bırakıyordu. Mesafe kontrolü artık yol kontrolünden önce.
+
+---
+
 ## 8. Unity'ye taşıma notları
 
 Bu proje bilerek taşınabilir bir iskelet bırakır. Eşleme:
@@ -333,7 +370,7 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 89 headless test |
+| `npm test` | 95 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
 | `npm run verify` | lint + test + a11y + build |

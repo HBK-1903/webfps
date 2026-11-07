@@ -851,7 +851,9 @@ function formatDebug(s) {
     lines.push(
       `${p.team} ${p.name.padEnd(8)} ${p.alive ? `${String(p.health).padStart(3)}hp` : '  ölü'} ` +
         `${(p.state || '').padEnd(11)} ${(p.lane || '-').padEnd(5)} ` +
-        `(${String(p.x).padStart(6)},${String(p.z).padStart(6)}) k/d ${p.kills}/${p.deaths}`,
+        `(${String(p.x).padStart(6)},${String(p.z).padStart(6)}) k/d ${p.kills}/${p.deaths} ` +
+        `${p.cover ? 'SİPER ' : ''}${p.crouch ? 'ÇÖMELİK ' : ''}${p.support ? 'DESTEK ' : ''}` +
+        `${p.goal ? `→${p.goal[0]},${p.goal[1]}` : ''}`,
     );
   }
   return lines.join('\n');

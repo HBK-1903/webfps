@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createBrain, canSee, updateBot, hearSound, BOT_STATE, createCoordinator, assignLanes } from '../src/core/bot.js';
+import { createBrain, canSee, updateBot, hearSound, BOT_STATE, createCoordinator, assignLanes, callForHelp, latestHelp } from '../src/core/bot.js';
 import { createMatch, startMatch, PHASE, updateMatch } from '../src/core/match.js';
 import { createActor, resetActorIds } from '../src/core/actor.js';
 import { MAP_AABBS } from '../src/core/map.js';
 import { NavGrid } from '../src/core/navgrid.js';
 import { DIFFICULTY, PLAYER } from '../src/core/config.js';
 import { mulberry32, createGame, updateGame } from '../src/core/game.js';
+import { buildCoverPoints, getCoverPoints, hiddenFrom, pickCoverFor } from '../src/core/cover.js';
 
 const grid = new NavGrid(MAP_AABBS);
 
@@ -388,4 +389,135 @@ test('a bot pushed into a teammate separates instead of standing inside them', (
   }
   const d = Math.hypot(a.x - b.x, a.z - b.z);
   assert.ok(d > 0.8, `bots stayed inside each other (${d.toFixed(2)} m apart)`);
+});
+
+test('cover points are derived from the map and stay mirror-symmetric', () => {
+  const geometric = buildCoverPoints();
+  assert.ok(geometric.length > 60, `expected a decent number of cover points, got ${geometric.length}`);
+  // The geometric set is exactly mirror-symmetric before it is snapped to the grid.
+  const gkey = new Set(geometric.map((p) => `${p.x.toFixed(2)},${p.z.toFixed(2)}`));
+  assert.equal(geometric.filter((p) => !gkey.has(`${(-p.x).toFixed(2)},${(-p.z).toFixed(2)}`)).length, 0);
+
+  // What bots actually use: snapped onto the nav grid, still symmetric and usable.
+  const points = getCoverPoints(grid);
+  assert.ok(points.length > 40, `expected a decent number of cover points, got ${points.length}`);
+  // Every point must be standable and must actually hide a crouched body from
+  // the direction it claims to cover (the probe is a real raycast).
+  for (const p of points) {
+    assert.equal(grid.isWalkableAt(p.x, p.z), true, `cover point ${p.x},${p.z} is not walkable`);
+    const probe = { x: p.x + p.faceX * 5, y: 1.55, z: p.z + p.faceZ * 5 };
+    assert.equal(hiddenFrom(p.x, p.z, probe), true, `cover point ${p.x},${p.z} does not actually hide`);
+  }
+  // The map is 180° rotationally symmetric, so the cover set must be too — an
+  // asymmetric cover set silently favours one side.
+  const key = new Set(points.map((p) => `${p.x.toFixed(2)},${p.z.toFixed(2)}`));
+  const missing = points.filter((p) => !key.has(`${(-p.x).toFixed(2)},${(-p.z).toFixed(2)}`));
+  assert.equal(missing.length, 0, `${missing.length} cover points have no mirrored twin`);
+  const left = points.filter((p) => p.x < 0).length;
+  const right = points.filter((p) => p.x > 0).length;
+  assert.equal(left, right, `cover points are not balanced (${left} left / ${right} right)`);
+});
+
+test('a wounded bot walks to a real cover point and crouches there', () => {
+  // Realistic duel: the enemy is far, so the bot has to walk to cover. Cover is
+  // a stance decision made against a threat the bot can actually see.
+  const { match, bot, target } = makeDuel('hard', 21);
+  bot.health = 40;
+  bot.armor = 0;
+  bot.x = 20;
+  bot.z = -19;
+  bot.yaw = -Math.PI / 2;
+  target.x = -4;
+  target.z = -19;
+  const coord = createCoordinator();
+  let pickedCover = false;
+  let crouchedTicks = 0;
+  for (let i = 0; i < 60 * 25; i++) {
+    match.time += 1 / 60;
+    updateBot(match, bot, 1 / 60, { grid, boxes: MAP_AABBS, coordinator: coord });
+    if (bot.brain.coverSpot) pickedCover = true;
+    if (bot.crouch > 0.5) crouchedTicks++;
+    // Keep both alive and in place: we are testing the stance, not the fight.
+    target.alive = true;
+    target.health = 100;
+    target.x = -4;
+    target.z = -19;
+    bot.alive = true;
+    bot.health = Math.min(bot.health, 55);
+  }
+  assert.ok(pickedCover, 'a wounded bot should pick a cover point');
+  assert.ok(crouchedTicks > 0, 'crouching is how a bot uses chest-high cover');
+});
+
+test('pickCoverFor never returns a spot the threat can see through', () => {
+  // Direct guard on the selector: every returned spot must pass the real
+  // raycast, for many bot/threat pairs across the map.
+  const points = getCoverPoints(grid);
+  let checked = 0;
+  for (const threat of [
+    { x: -20, z: -14 }, { x: 14, z: 12 }, { x: 2, z: 0 },
+  ]) {
+    for (const bot of [
+      { x: 0, z: -18 }, { x: -10, z: 8 }, { x: 16, z: -6 }, { x: 6, z: 16 },
+    ]) {
+      const spot = pickCoverFor(bot, points, threat);
+      if (!spot) continue;
+      checked++;
+      assert.ok(
+        hiddenFrom(spot.x, spot.z, { x: threat.x, y: 1.55, z: threat.z }),
+        `picked cover ${spot.x},${spot.z} is visible from ${threat.x},${threat.z}`,
+      );
+    }
+  }
+  assert.ok(checked >= 3, `expected some cover picks to check, got ${checked}`);
+});
+
+test('a bot only uses cover that hides it from the threat it knows about', () => {
+  // Real geometry test with no AI involved: standing behind a box hides you from
+  // one side and not from the other. This is what stops "fake" cover.
+  const crate = { minX: -1, maxX: 1, minY: 0, maxY: 2, minZ: -1, maxZ: 1, kind: 'crate' };
+  const boxes = [crate];
+  // Actor at z = -3 is on the far side of the box (z in [-1,1]) seen from z=+10.
+  const behind = { x: 0, z: -3 };
+  assert.equal(hiddenFrom(behind.x, behind.z, { x: 0, y: 1.55, z: 10 }, boxes), true, 'box should hide us');
+  assert.equal(hiddenFrom(behind.x, behind.z, { x: 0, y: 1.55, z: -10 }, boxes), false, 'box must not hide us from the other side');
+});
+
+test('a teammate in trouble nearby gets help', () => {
+  const match = createMatch({ difficulty: 'hard' });
+  const rng = mulberry32(15);
+  const coord = createCoordinator();
+  for (const a of match.actors) if (!a.isPlayer) a.brain = createBrain(a, match.profile, { rng, lane: 'mid' });
+  startMatch(match);
+  assignLanes(match, coord, rng);
+  updateMatch(match, 1 / 60);
+  const team = match.actors.filter((a) => a.team === 'A' && !a.isPlayer);
+  const [hurt, helper] = team;
+  hurt.alive = true;
+  helper.alive = true;
+  hurt.x = 4;
+  hurt.z = 8;
+  helper.x = 6;
+  helper.z = 8;
+  // The hurt bot was just shot: that is what raises a call for help.
+  hurt.lastDamageAt = match.time;
+  hurt.lastAttackerId = 999;
+  updateBot(match, hurt, 1 / 60, { grid, boxes: MAP_AABBS, coordinator: coord });
+  const call = latestHelp(coord, 'A', match.time, helper.id);
+  assert.ok(call, 'a shot teammate should call for help');
+  assert.equal(call.by, hurt.id);
+  // The call may only carry the ally's own position — never an enemy's.
+  assert.ok(Math.abs(call.x - hurt.x) < 0.6 && Math.abs(call.z - hurt.z) < 0.6, 'the call must carry the ally position');
+  assert.equal(latestHelp(coord, 'B', match.time, 0), null, 'the other team must not hear it');
+});
+
+test('help calls never leak enemy positions', () => {
+  // Structural check: the only payload callForHelp accepts is a friendly actor.
+  const coord = createCoordinator();
+  const ally = { id: 7, team: 'A', x: 3, z: -4 };
+  callForHelp(coord, ally, 1);
+  const call = latestHelp(coord, 'A', 1, 99);
+  assert.deepEqual(Object.keys(call).sort(), ['by', 'team', 'time', 'x', 'z']);
+  assert.equal(call.x, ally.x);
+  assert.equal(call.z, ally.z);
 });

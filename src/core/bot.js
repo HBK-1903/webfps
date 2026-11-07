@@ -8,6 +8,7 @@ import { eyePoint, bodyRadius, hitVolumes } from './actor.js';
 import { directionFromAngles, performShot, anglesTo, castShot } from './combat.js';
 import { activeWeapon, updateWeapon, startReload, tryShoot, releaseTrigger, switchWeapon, cancelReload } from './weapon.js';
 import { ROUTES, ENEMY_SPAWN_AREA } from './map.js';
+import { getCoverPoints, pickCoverFor, hiddenFrom } from './cover.js';
 import { registerDamage } from './match.js';
 
 export const BOT_STATE = {
@@ -55,6 +56,21 @@ export function createBrain(actor, profile, { rng = Math.random, lane = 'mid' } 
     decisionTimer: 0,
     investigateTimer: 0,
     coverTarget: null,
+    // Cover: the spot we are crouching behind and the enemy it hides us from.
+    // `coverThreatId` is deliberately an id, not a live position: the bot only
+    // keeps using a spot while the threat is still roughly where it was.
+    coverSpot: null,
+    coverThreatId: 0,
+    coverUntil: 0,
+    coverPeek: 0,
+    coverHold: 0,
+    coverCooldown: 0,
+    // Ally support: remember who called for help and how long we are helping.
+    supportUntil: 0,
+    supportId: 0,
+    supportCall: null,
+    supportCooldown: 0,
+    helpCalls: 0,
     // status flags for HUD/debug
     statusText: 'hazır',
     shots: 0,
@@ -83,6 +99,17 @@ export function createBrain(actor, profile, { rng = Math.random, lane = 'mid' } 
       this.pushTimer = 0;
       this.sweepTimer = 0;
       this.detourUntil = 0;
+      this.coverSpot = null;
+      this.coverThreatId = 0;
+      this.coverUntil = 0;
+      this.coverPeek = 0;
+      this.coverHold = 0;
+      this.coverCooldown = 0;
+      this.supportUntil = 0;
+      this.supportId = 0;
+      this.supportCall = null;
+      this.supportCooldown = 0;
+      this.helpCalls = 0;
       this.shots = 0;
       this.hits = 0;
       this.statusText = 'hazır';
@@ -108,7 +135,51 @@ export function createCoordinator() {
     // Recent contact positions ("hot areas"). Squads converge on the last place
     // a fight happened instead of sweeping random corners of the map.
     hot: [],
+    // Ally calls for help: {team, by, x, z, time}. Teammates may always know
+    // where their own squad is, so this leaks no enemy information.
+    help: [],
+    // Which cover point each teammate has claimed: {team, by, key, time}.
+    // Without this the whole squad dives behind the same crate.
+    claims: [],
   };
+}
+
+/** Claim a cover point for this bot (teammates then pick something else). */
+export function claimCover(coordinator, bot, point, time) {
+  if (!coordinator || !coordinator.claims) return;
+  const key = `${point.x.toFixed(1)},${point.z.toFixed(1)}`;
+  coordinator.claims = coordinator.claims.filter((c) => time - c.time < 8 && c.by !== bot.id && c.key !== key);
+  coordinator.claims.push({ team: bot.team, by: bot.id, key, time });
+  if (coordinator.claims.length > 20) coordinator.claims.shift();
+}
+
+/** True when a living teammate already claimed this cover point. */
+export function coverClaimed(coordinator, bot, point, time) {
+  if (!coordinator || !coordinator.claims) return false;
+  const key = `${point.x.toFixed(1)},${point.z.toFixed(1)}`;
+  return coordinator.claims.some((c) => c.team === bot.team && c.by !== bot.id && c.key === key && time - c.time < 8);
+}
+
+/**
+ * Record that `ally` is in trouble. Everyone on the same team can see this, but
+ * it carries only the ally's own position — never an enemy's.
+ */
+export function callForHelp(coordinator, ally, time) {
+  if (!coordinator || !coordinator.help) return;
+  coordinator.help = coordinator.help.filter((h) => time - h.time < 6 && h.by !== ally.id);
+  coordinator.help.push({ team: ally.team, by: ally.id, x: ally.x, z: ally.z, time });
+  if (coordinator.help.length > 8) coordinator.help.shift();
+}
+
+/** Newest unanswered call for help from `team` (excluding the caller). */
+export function latestHelp(coordinator, team, time, selfId, maxAge = 5) {
+  if (!coordinator || !coordinator.help) return null;
+  for (let i = coordinator.help.length - 1; i >= 0; i--) {
+    const h = coordinator.help[i];
+    if (h.team !== team || h.by === selfId) continue;
+    if (time - h.time <= maxAge) return h;
+  }
+  return null;
 }
 
 /** Remember where a contact was lost so the squad can converge there. */
@@ -519,6 +590,99 @@ export function separateFromOthers(match, bot, boxes, separateRadius = 0.92) {
 }
 
 /** Main bot update. */
+/**
+ * Decide whether to use cover, and which spot.
+ *
+ * Rules, in order:
+ *  1. Only a bot that is actually being shot at (visible threat or recent damage)
+ *     looks for cover — bots never pre-hide from a threat they cannot know about.
+ *  2. The spot must really hide a crouched body from *that specific* threat
+ *     (real raycast against the same boxes the player collides with).
+ *  3. It is dropped as soon as the threat moves out of the tested direction, so a
+ *     bot never stares at a wall hiding from someone who flanked it.
+ *
+ * Higher difficulties use cover more often and re-check it more eagerly; the
+ * geometry test itself is identical for every difficulty (no cheating cover).
+ */
+function updateCoverDecision(match, bot, grid, boxes, ctx) {
+  const brain = bot.brain;
+  if (globalThis.__NOCOVER) { brain.coverSpot = null; return; }
+  const prof = brain.profile;
+  const threat = brain.targetVisible ? brain.target : null;
+  const shotAt = bot.lastDamageAt > match.time - 1.2;
+  if (!threat && !shotAt) {
+    brain.coverSpot = null;
+    brain.coverThreatId = 0;
+    return;
+  }
+  // Cover is a "wounded" behaviour: a healthy bot keeps fighting and pushing
+  // (hiding with full health just hands the enemy the initiative). While in
+  // cover it still peeks out and shoots, so it never goes passive.
+  const hurt = bot.health + bot.armor < (PLAYER.maxHealth + PLAYER.maxArmor) * 0.5;
+  const dry = activeWeapon(bot.loadout).mag === 0;
+  const wantsCover = threat && (hurt || dry) && brain.rng() < prof.coverUse * 0.5;
+  if (!wantsCover) {
+    if (brain.coverSpot && match.time > brain.coverUntil) brain.coverSpot = null;
+    return;
+  }
+  // Cover may not stall the round: after a few seconds the bot gives it up and
+  // re-joins the push even if it is still hurt.
+  if (brain.coverSpot && match.time > brain.coverUntil) {
+    brain.coverSpot = null;
+    brain.coverCooldown = match.time + 8;
+  }
+  if (match.time < brain.coverCooldown) return;
+  const threatId = threat ? threat.id : bot.lastAttackerId;
+  // Keep the current spot while it still hides us from the same threat.
+  if (brain.coverSpot && brain.coverThreatId === threatId && match.time < brain.coverUntil) {
+    const moved = Math.hypot(brain.coverSpot.x - bot.x, brain.coverSpot.z - bot.z);
+    if (moved >= 1.2) {
+      // Still walking there. Re-pathing every tick would thrash the target (and
+      // the previous version dropped the spot entirely, so bots never arrived).
+      if (brain.path.length === 0) setDetour(bot, grid, brain.coverSpot.x, brain.coverSpot.z, match, 5);
+      return;
+    }
+    const hideFrom = threat ? { x: threat.x, y: 1.55, z: threat.z } : brain.lastSeen ? { x: brain.lastSeen.x, y: 1.55, z: brain.lastSeen.z } : null;
+    const stillHidden = hideFrom && hiddenFrom(brain.coverSpot.x, brain.coverSpot.z, hideFrom, boxes);
+    if (stillHidden) {
+      brain.coverSpot.hiding = true;
+      return;
+    }
+    brain.coverSpot = null;
+  }
+  const points = getCoverPoints(grid);
+  const hideFrom = threat || (brain.lastSeen ? { x: brain.lastSeen.x, z: brain.lastSeen.z } : null);
+  let spot = pickCoverFor(bot, points, hideFrom);
+  if (spot && coverClaimed(ctx.coordinator, bot, spot, match.time)) spot = null;
+  if (!spot) {
+    // Everything close is taken: stay near the squad but pick a different spot.
+    for (const cand of points) {
+      if (coverClaimed(ctx.coordinator, bot, cand, match.time)) continue;
+      const d = Math.hypot(cand.x - bot.x, cand.z - bot.z);
+      if (d > 14) continue;
+      const threatPos = hideFrom;
+      if (!threatPos) continue;
+      if (!hiddenFrom(cand.x, cand.z, { x: threatPos.x, y: 1.55, z: threatPos.z }, boxes)) continue;
+      spot = cand;
+      break;
+    }
+  }
+  if (spot) {
+    if (ctx.coordinator) claimCover(ctx.coordinator, bot, spot, match.time);
+    brain.coverSpot = { ...spot, hiding: false };
+    brain.coverThreatId = threatId;
+    // Reach the spot, then hold there for a few seconds before re-evaluating.
+    brain.coverUntil = match.time + rngRange(brain, 1.6, 2.8);
+    brain.coverPeek = 0;
+    brain.coverHold = rngRange(brain, 0.4, 0.9);
+    setDetour(bot, grid, spot.x, spot.z, match, 5);
+    brain.statusText = 'sipere giriyor';
+    // Deliberately NOT switching state: the bot keeps engaging while it walks to
+    // its cover point, otherwise moving to cover looks like disengaging.
+    if (brain.state === BOT_STATE.HOLD) brain.state = BOT_STATE.ADVANCE;
+  }
+}
+
 export function updateBot(match, bot, dt, ctx) {
   const brain = bot.brain;
   if (!brain) return;
@@ -591,6 +755,41 @@ export function updateBot(match, bot, dt, ctx) {
       brain.statusText = 'takım çağrısı';
     }
   }
+
+  // --- ally support -----------------------------------------------------
+  // A teammate that is being shot at calls for help (limited by coordination, so
+  // easy bots mostly ignore each other and hard bots respond reliably).
+  if (bot.lastDamageAt > match.time - 0.35 && ctx.coordinator && brain.rng() < prof.coordination) {
+    callForHelp(ctx.coordinator, bot, match.time);
+  }
+  if (globalThis.__NOSUPPORT) bot.brain.supportCall = null;
+  const distress = globalThis.__NOSUPPORT ? null : latestHelp(ctx.coordinator, bot.team, match.time, bot.id);
+  brain.supportCall = distress;
+  if (distress && match.time > brain.supportCooldown) {
+    const allyDist = Math.hypot(distress.x - bot.x, distress.z - bot.z);
+    // Reinforcement is a *nearby* reflex, not a map-wide rescue: sprinting across
+    // the map to a teammate who is usually already dead hands the round away and
+    // pulls the bot back out of the lane it had pushed into.
+    const free = !brain.targetVisible && brain.state !== BOT_STATE.ENGAGE &&
+      brain.state !== BOT_STATE.RETREAT && brain.state !== BOT_STATE.RELOAD;
+    const sign = bot.team === 'A' ? 1 : -1;
+    const forward = distress.x * sign >= bot.x * sign - 2;
+    if (allyDist < 14 && free && forward && brain.rng() < prof.coordination * 0.8) {
+      brain.supportUntil = match.time + 3;
+      brain.supportId = distress.by;
+      brain.helpCalls += 1;
+      brain.statusText = 'arkadaşına destek';
+      // Head towards the ally's own position — a friendly, always-known fact.
+      setDetour(bot, grid, distress.x, distress.z, match, 3);
+      brain.state = BOT_STATE.ADVANCE;
+      brain.supportCooldown = match.time + 6;
+    } else {
+      brain.supportCooldown = match.time + 2.5;
+    }
+  }
+
+  // --- cover decision ---------------------------------------------------
+  updateCoverDecision(match, bot, grid, boxes, ctx);
 
   // --- damage reaction ------------------------------------------------
   if (bot.lastDamageAt > match.time - 0.25 && bot.lastAttackerId !== 0) {
@@ -811,13 +1010,47 @@ export function updateBot(match, bot, dt, ctx) {
     default: {
       brain.statusText = 'çatışıyor';
       if (brain.target && brain.targetVisible) {
+        // Cover first: a hurt bot (or any bot on the higher difficulties) breaks
+        // the fight by crouching behind real geometry, then peeks back out.
+        const coverDist = Math.hypot(brain.target.x - bot.x, brain.target.z - bot.z);
+        // Cover is a *stance*, not a separate state: the bot keeps aiming,
+        // shooting and tracking while it crouches. (An earlier version returned
+        // early here, which silently stopped bots from fighting at all and made
+        // every difficulty easier.)
+        const inCover = brain.coverSpot && brain.coverSpot.hiding && match.time < brain.coverUntil && coverDist < 26 && coverDist > 9;
+        if (inCover) {
+          brain.statusText = 'siperde';
+          bot.speedFactor = 0;
+          // Peek/hide cycle: stay down for `coverHold`, pop up for `coverPeek`.
+          // (Re-arming the peek in the same tick it expired meant the bot was
+          // always standing and never actually used the cover.)
+          brain.coverPeek -= dt;
+          brain.coverHold -= dt;
+          if (brain.coverPeek > 0) {
+            bot.crouch = Math.max(0, bot.crouch - dt * 8);
+          } else {
+            bot.crouch = Math.min(1, bot.crouch + dt * 8);
+            if (brain.coverHold <= 0 && bot.crouch >= 0.9 && brain.aimRamp > 0.4) {
+              brain.coverPeek = rngRange(brain, 0.8, 1.4);
+              brain.coverHold = rngRange(brain, 0.7, 1.4);
+            }
+          }
+          combatTick(match, bot, dt, ctx);
+          // Spend the mag, then drop the spot so the bot re-engages normally.
+          if (coverDist < 9) {
+            // Enemy too close for cover to mean anything: stand and fight.
+            brain.coverSpot = null;
+            brain.coverUntil = 0;
+          }
+        }
+        if (!inCover) bot.crouch = Math.max(0, bot.crouch - dt * 4);
         // Strafe for a harder target, with cover awareness on higher difficulty.
         if (brain.strafeTimer <= 0) {
           brain.strafeTimer = rngRange(brain, 0.9, 2.2);
           brain.strafeDir = brain.rng() < 0.5 ? -1 : 1;
           brain.strafeActive = brain.rng() < prof.strafeChance;
         }
-        if (brain.strafeActive) {
+        if (brain.strafeActive && !inCover) {
           const perpYaw = bot.yaw + (Math.PI / 2) * brain.strafeDir;
           const sx = Math.sin(perpYaw) * 2.6 * dt;
           const sz = -Math.cos(perpYaw) * 2.6 * dt;
@@ -828,10 +1061,27 @@ export function updateBot(match, bot, dt, ctx) {
         } else {
           bot.speedFactor = 0;
         }
-        // Close the distance when the fight is far away: long-range duels with
-        // big aim error never resolve, so the bot pushes in.
+        // Walking to a cover point takes priority over closing the distance.
+        const seekCover = brain.coverSpot && !brain.coverSpot.hiding;
         const dist = Math.hypot(brain.target.x - bot.x, brain.target.z - bot.z);
-        if (dist > 16) {
+        if (seekCover) {
+          const spot = brain.coverSpot;
+          const toSpot = Math.hypot(spot.x - bot.x, spot.z - bot.z);
+          if (toSpot > 1.2) {
+            // Note: followPath() reports "arrived" for an empty path, so the
+            // distance check has to come first — otherwise the bot decides it is
+            // already in cover while standing five metres away and drops it.
+            if (brain.path.length === 0) setDetour(bot, grid, spot.x, spot.z, match, 5);
+            followPath(bot, grid, boxes, dt, 1.05);
+          } else {
+            const threatPos = { x: brain.target.x, y: 1.55, z: brain.target.z };
+            spot.hiding = hiddenFrom(spot.x, spot.z, threatPos, boxes);
+            if (!spot.hiding) {
+              brain.coverSpot = null;
+              brain.coverUntil = 0;
+            }
+          }
+        } else if (dist > 16) {
           if (brain.decisionTimer <= 0 || brain.path.length === 0) {
             brain.decisionTimer = 1.5;
             setPathTo(bot, grid, brain.target.x, brain.target.z);

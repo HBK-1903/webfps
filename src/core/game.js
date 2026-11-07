@@ -460,6 +460,14 @@ export function gameSnapshot(game) {
       z: Number(a.z.toFixed(2)),
       state: a.brain ? a.brain.state : 'player',
       lane: a.brain ? a.brain.lane : null,
+      // Tactical read-out for the F3 overlay: is this bot in cover, crouched,
+      // helping a teammate, and what is it trying to reach?
+      cover: Boolean(a.brain && a.brain.coverSpot),
+      crouch: a.crouch > 0.5,
+      support: Boolean(a.brain && a.brain.supportCall),
+      goal: a.brain && a.brain.pathGoal
+        ? [Math.round(a.brain.pathGoal.x), Math.round(a.brain.pathGoal.z)]
+        : null,
       kills: a.kills,
       deaths: a.deaths,
     })),

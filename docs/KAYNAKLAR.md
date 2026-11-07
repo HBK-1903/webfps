@@ -73,3 +73,8 @@ Ek olarak değerlendirilen FPS referansları (kod kopyalanmadı, yalnızca yakla
   determinizm eklendiğinde altta **beş gerçek oynanış hatası** çıktı (README §7b). Ders: rastgeleliği
   tohumlamak, testi "yeşile boyamak" değil, ölçüm aracını düzeltmektir. Bu turdan sonra 40 tam koşu
   üst üste hatasız geçti (89/89 test, 0 flake).
+- **Siper AI'ı için referans taraması** → siper noktası üretiminde iki yaklaşım karşılaştırıldı: elle
+  işaretlenmiş nokta listeleri (bakımı zor, harita değişince bayatlar) ve geometriden türetme. Geometri
+  tarafı seçildi: 56 kutudan 156 aday üretilip her biri gerçek raycast ile doğrulanıyor, harita
+  değişirse siper listesi kendiliğinden güncelleniyor. Üçüncü taraf kod alınmadı.
+
