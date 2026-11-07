@@ -1,0 +1,6 @@
+node_modules/
+# keep the single-file offline build committed (it is the playable artifact)
+dist/*
+!dist/SifirNokta.html
+*.log
+.DS_Store
