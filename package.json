@@ -14,7 +14,13 @@
     "verify": "npm run lint && npm test && npm run a11y && npm run build",
     "qa": "node tools/qa.mjs",
     "matrix": "node tools/matrix.mjs",
-    "a11y": "node tools/a11y.mjs --strict"
+    "a11y": "node tools/a11y.mjs --strict",
+    "build:site": "node build.mjs && node tools/build-site.mjs",
+    "preview:site": "node tools/serve.mjs --site",
+    "icons": "node tools/make-icons.mjs",
+    "app": "electron app/main.cjs",
+    "app:dist": "npm run build && npm run icons && electron-builder --win",
+    "app:dist:portable": "npm run build && npm run icons && electron-builder --win portable"
   },
   "dependencies": {
     "three": "0.169.0"
@@ -22,12 +28,16 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "axe-core": "^4.14.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
+    "js-yaml": "^4.3.2",
     "jsdom": "^31.0.0",
     "lil-gui": "^0.20.0"
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "main": "app/main.cjs"
 }

@@ -316,3 +316,35 @@ test('F2 tuning panel (lil-gui) writes into the live config', async () => {
   assert.equal(app.tuningOpen, false, 'F2 hides the panel again');
   assert.deepEqual(errors, [], `runtime errors: ${errors.map((e) => e && e.message).join(' | ')}`);
 });
+
+test('the install button reacts to the browser install prompt and is hidden without one', async () => {
+  const { window, errors } = bootApp();
+  installRaf(window);
+  await new Promise((r) => setTimeout(r, 30));
+
+  const button = window.document.getElementById('install-btn');
+  assert.ok(button, 'the install button exists in the menu');
+  // jsdom never fires beforeinstallprompt: nothing is installable here, so the
+  // button must stay hidden rather than promise a dialog that cannot appear.
+  assert.equal(button.hidden, true, 'no prompt available -> no button');
+
+  // Simulate Chrome offering an install prompt.
+  const event = new window.Event('beforeinstallprompt', { cancelable: true });
+  event.prompt = () => {
+    event.__prompted = true;
+  };
+  event.userChoice = Promise.resolve({ outcome: 'accepted' });
+  window.dispatchEvent(event);
+  assert.equal(button.hidden, false, 'prompt available -> button appears');
+
+  const clicks = [];
+  const toast = window.document.getElementById('toast');
+  clicks.push(toast);
+  button.dispatchEvent(new window.MouseEvent('click', { bubbles: true, button: 0 }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(event.__prompted, true, 'clicking must fire the browser dialog');
+  assert.match(toast.textContent, /kuruldu/i, 'user gets feedback after installing');
+  assert.equal(button.hidden, true, 'a used prompt is gone: hide the button again');
+  assert.equal(errors.length, 0, `unexpected errors: ${errors.map(String).join(', ')}`);
+});

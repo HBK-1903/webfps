@@ -5,8 +5,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = Number(process.env.PORT || 5173);
+// `--site` previews the built static site (dist/site) instead of the dev tree.
+// Done with a flag rather than an env-var prefix so it works on Windows too.
+const SITE_MODE = process.argv.includes('--site');
+const ROOT = process.env.SERVE_DIR
+  ? path.resolve(process.env.SERVE_DIR)
+  : SITE_MODE
+    ? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'site')
+    : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PORT = Number(process.env.PORT || (SITE_MODE ? 8080 : 5173));
 const HOST = process.env.HOST || '0.0.0.0';
 
 const MIME = {
@@ -15,6 +22,7 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -56,5 +64,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[sifir-nokta] dev server listening on http://${HOST}:${PORT}`);
+  console.log(`[sifir-nokta] ${SITE_MODE ? 'site preview' : 'dev server'} listening on http://${HOST}:${PORT}`);
 });

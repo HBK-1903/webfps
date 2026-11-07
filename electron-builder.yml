@@ -1,0 +1,72 @@
+# Electron packaging configuration (electron-builder).
+#
+# Windows is the primary target: an NSIS installer plus a portable single .exe.
+# macOS (.dmg) and Linux (.AppImage) are configured too, but each must be built
+# on its own platform — or in CI, see .github/workflows/desktop.yml.
+#
+# Build:  npm run app:dist        → dist-app/
+appId: com.hbk.sifirnokta
+productName: SIFIR NOKTA
+copyright: SIFIR NOKTA — taktik eğitim tesisi
+
+directories:
+  output: dist-app
+  buildResources: build
+
+# Only what the game needs at runtime. Shipping node_modules would add hundreds
+# of megabytes of dev tooling to a 640 KB game.
+files:
+  - app/**/*
+  - dist/SifirNokta.html
+  - build/icon.ico
+  - '!**/*.map'
+
+extraMetadata:
+  main: app/main.cjs
+
+asar: true
+compression: maximum
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: SIFIR-NOKTA-${version}-${arch}.${ext}
+  # No code-signing certificate here; unsigned installers trigger a SmartScreen
+  # warning on first run. Users can click "More info → Run anyway".
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: SIFIR NOKTA
+  installerLanguages:
+    - tr_TR
+    - en_US
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: SIFIR-NOKTA-${version}-portable.${ext}
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.games
+  icon: build/icon.png
+  artifactName: SIFIR-NOKTA-${version}-${arch}.${ext}
+  darkModeSupport: true
+
+linux:
+  target: [AppImage]
+  icon: build/icon.png
+  category: Game
+  synopsis: Çevrimdışı 5v5 taktik FPS
+  artifactName: SIFIR-NOKTA-${version}-${arch}.${ext}

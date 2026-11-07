@@ -34,11 +34,59 @@ npm run build        # -> dist/SifirNokta.html  (tek dosya, her şey gömülü)
 | Herhangi | `dist/SifirNokta.html` çift tıkla | Tarayıcıda sekmeli tam ekran oynanır |
 
 `launcher` betikleri Chrome/Edge'i `--app=` modunda açar: sekme yok, adres çubuğu yok, ayrı profil
-(`%TEMP%\sifirnokta-profile`). Bu, dağıtılabilir bir `.exe` değil, bir masaüstü pencere sarmalayıcısıdır.
+(`%TEMP%\sifirnokta-profile`).
+
+### Kurulabilir uygulama (PWA) ve gerçek `.exe`
+
+Üç dağıtım yolu var; hepsi aynı oyundan üretilir, ayrı kod yok.
+
+**a) PWA — "Yükle" ile uygulama olur (tek kod tabanı, ~1.3 MB)**
+```bash
+npm run build:site     # -> dist/site/  (index.html, manifest, sw.js, ikonlar, _headers)
+npm run preview:site   # http://localhost:8080 — Chrome/Edge'de "Yükle" düğmesi çıkar
+```
+Kurulduktan sonra oyun **kendi penceresinde** açılır (tarayıcı çubuğu yok), Başlat menüsünde görünür ve
+service worker sayesinde **internet olmadan** çalışır. Oyun içi menüde de "UYGULAMA OLARAK YÜKLE"
+düğmesi belirir — ama yalnızca tarayıcı gerçekten kurabiliyorsa (HTTPS veya localhost gerekir;
+`file://` üzerinde düğme görünmez, çünkü orada kurulum diye bir şey yoktur).
+
+Yayınlamak için `dist/site` klasörünü olduğu gibi yükle:
+
+| Servis | Ayar |
+|---|---|
+| Cloudflare Pages | Build: `npm install && npm run build:site` · Çıktı: `dist/site` |
+| Netlify | Build: `npm run build:site` · Publish: `dist/site` |
+| GitHub Pages | `dist/site` içeriğini `gh-pages` dalına koy |
+
+`dist/site/_headers` dosyası Cloudflare/Netlify için hazır: sıkı CSP, `nosniff`, `no-referrer`,
+`frame-ancestors 'none'`, ve "giriş dosyalarını asla önbelleğe alma" kuralı (yoksa yeni sürüm
+oyunculara günlerce ulaşmaz).
+
+**b) Windows `.exe` (NSIS kurulum + tek dosya portable)**
+```bash
+npm run app        # geliştirme: Electron penceresinde aç
+npm run app:dist   # -> dist-app/SIFIR-NOKTA-0.9.0-x64.exe (+ portable)
+```
+Pencere: 1600×900 (ekrana göre küçültülür), menü çubuğu yok, `backgroundThrottling` kapalı (oyun
+arkada kalınca yavaşlamasın), F11 tam ekran, F12 DevTools. Güvenlik: `contextIsolation: true`,
+`nodeIntegration: false`, `sandbox: true` — renderer'a verilen tek yetenek "çıkış" köprüsü.
+
+**Önemli:** Windows `.exe` dosyası Linux'ta üretilemez (Wine ya da Windows gerekir). Bu yüzden
+`.github/workflows/desktop.yml` üç platformda native derleme yapar:
+Actions → **desktop** → Run workflow → `windows` seç → çalışma bitince artifact olarak `.exe` iner.
+`v*` etiketi atarsan aynı iş akışı dosyaları GitHub Release'e ekler.
+
+Kod imzalama sertifikası olmadığı için Windows ilk çalıştırmada SmartScreen uyarısı verir:
+**Ek bilgi → Yine de çalıştır**.
+
+**c) Mevcut `--app` başlatıcıları** — kurulum istemiyorsanız yukarıdaki tablo hâlâ geçerli.
+
+**İkonlar** oyunun kendi paletinden üretilir, hazır dosya yoktur: `npm run icons` → `icons/*.png` + `build/icon.ico`
+(4x supersampling ile PNG ve ICO yazan küçük bir betik; harici görsel kütüphanesi kullanmaz).
 
 ### Testler ve kalite kapısı
 ```bash
-npm test             # 95 test, tamamı headless (Node + jsdom)
+npm test             # 103 test, tamamı headless (Node + jsdom)
 npm run lint         # ESLint (gerçek hata odaklı kural seti)
 npm run verify       # lint + test + build — tek komutta tam doğrulama
 npm run qa           # scripted playtest → docs/QA-REPORT.md
@@ -165,7 +213,7 @@ src/
     scene.js  actorRigs.js  viewmodel.js  fx.js
   ui/                   # HUD, ses, ayarlar (localStorage)
   main.js               # uygulama kabuğu: menü akışı, input, pointer lock, render döngüsü
-tests/                  # 95 test (core, AI, HUD, e2e app boot)
+tests/                  # 103 test (core, AI, HUD, PWA, e2e app boot)
 tools/serve.mjs         # dev sunucusu
 tools/sim.mjs           # headless maç simülatörü
 build.mjs               # tek dosya offline build
@@ -178,7 +226,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 
 ## 5. Test raporu
 
-`npm test` → **95/95 geçti** (Node 22 + jsdom, headless):
+`npm test` → **103/103 geçti** (Node 22 + jsdom, headless):
 
 | Dosya | Kapsam |
 |---|---|
@@ -187,6 +235,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 | `tests/match.test.js` (11) | 5v5 kurulum, geri sayım, eleme ile raund sonu, çift tetiklenmeme, raund reseti (can/zırh/ammo/pozisyon), ilk-3 zafer, beraberlik, tıkanma kararı, maç sonu dondurma |
 | `tests/nav.test.js` (11) | Yürünebilirlik, spawn simetrisi ve güvenliği, A* erişilebilirliği, tünelleme yok, LOS, ray-cast |
 | `tests/ai.test.js` (22) | Duvar arkasını görmeme, FOV konisi, zorluk farkı (ölçülmüş tepki/isabet), son bilinen konum, işitme gürültüsü, boş şarjörle ateş etmeme, harita dışına çıkmama, yığılmama, lane yürüyüşü (spawn'da kilitlenmeme), sessiz raundun çözülmesi (tıkanma bütçesi), tohumlu maç tekrarlanabilirliği (determinizm), takım arkadaşıyla ayrışma, siper noktalarının simetrisi + gerçekten saklaması, yaralı botun sipere gidip çömelmesi, siperin tek taraflı olması, yardım çağrısı ve **düşman konumu sızdırmaması** |
+| `tests/packaging.test.js` (7) | Electron config'i (appId, hedefler, dosya listesi) parse edilip doğrulanır; renderer güvenliği (`contextIsolation`/`sandbox`/`nodeIntegration`), in-game çıkış köprüsü, PWA manifest + maskable ikon, service worker sürümleme/temizlik ve `file://`'de sessizce devre dışı kalma |
 | `tests/integration.test.js` (11) | 3 zorlukta tam maç bitişi, geri sayımda hasar/ateş kilidi, ölüyken ateş, dost ateşi, kafa isabeti, duraklatma dondurması, restart temizliği, HUD durumu, hassasiyet etkisi |
 | `tests/ui.test.js` (5) | Gerçek HTML + gerçek HUD bağlaması, reload/boş şarjör, raund sonucu, ayar doğrulama/kalıcılık, tüm kontrol ID'leri |
 | `tests/integration.test.js` (14) | + canlı zorluk değişimi, paylaşılan nav grid, `gameSnapshot` sözleşmesi |
@@ -370,11 +419,16 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 95 headless test |
+| `npm test` | 103 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
 | `npm run verify` | lint + test + a11y + build |
 | `npm run build` | Tek dosya offline build (`dist/SifirNokta.html`) |
+| `npm run build:site` | Kurulabilir site (PWA) → `dist/site/` (manifest, sw, ikonlar, `_headers`) |
+| `npm run preview:site` | `dist/site` önizlemesi (port 8080) — "Yükle" düğmesini burada görürsün |
+| `npm run icons` | Uygulama ikonlarını üret (`icons/*.png`, `build/icon.ico`) |
+| `npm run app` | Electron masaüstü penceresinde çalıştır |
+| `npm run app:dist` | Windows kurulum + portable `.exe` üret (`dist-app/`) |
 | `npm run qa` | Senaryolu playtest + `docs/QA-REPORT.md` (JSON: `node tools/qa.mjs --json`) |
 | `npm run matrix` | Denge matrisi: zorluk × oyuncu modu, kazanma/tıkanma oranları (`docs/qa-matrix.json`). Güncel tablo: 60 maç/hücre, 360 maç |
 | `npm run sim -- <zorluk> <seed> <maç>` | Headless maç simülatörü |

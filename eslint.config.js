@@ -17,6 +17,9 @@ export default [
         HTMLElement: 'readonly', HTMLCanvasElement: 'readonly', console: 'readonly',
         setTimeout: 'readonly', clearTimeout: 'readonly', setInterval: 'readonly',
         devicePixelRatio: 'readonly', navigator: 'readonly',
+        location: 'readonly', URL: 'readonly', fetch: 'readonly',
+        Response: 'readonly', Request: 'readonly', caches: 'readonly',
+        matchMedia: 'readonly',
       },
     },
     rules: {
@@ -27,6 +30,37 @@ export default [
       'no-var': 'error',
       'prefer-const': 'warn',
     },
+  },
+  {
+    // Service worker: runs in its own global scope — `self` instead of `window`,
+    // and no DOM at all. Declared separately so the errors that matter (a typo
+    // in cache names, an undefined helper) are still caught.
+    files: ['src/pwa/sw.js', 'src/pwa/**/*.sw.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'script',
+      globals: {
+        self: 'readonly', caches: 'readonly', fetch: 'readonly',
+        Response: 'readonly', Request: 'readonly', URL: 'readonly',
+        console: 'readonly', Promise: 'readonly',
+      },
+    },
+    rules: { 'no-unused-vars': ['error', { args: 'after-used' }], 'no-undef': 'error' },
+  },
+  {
+    // Electron main + preload run in Node, not the browser.
+    files: ['app/**/*.cjs'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'commonjs',
+      globals: {
+        require: 'readonly', module: 'writable', exports: 'writable',
+        __dirname: 'readonly', process: 'readonly', console: 'readonly',
+        Buffer: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly',
+        window: 'readonly',
+      },
+    },
+    rules: { 'no-unused-vars': ['error', { args: 'after-used' }], 'no-undef': 'error' },
   },
   {
     files: ['tests/**/*.js', 'tools/**/*.mjs', '*.mjs'],

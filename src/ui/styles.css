@@ -117,6 +117,28 @@ html, body {
 .btn.danger { border-left-color: var(--danger); }
 .btn.danger:hover { background: rgba(224, 90, 74, 0.16); border-color: var(--danger); }
 
+.btn-install {
+  border-left-color: var(--accent);
+  color: #eafcfb;
+  background: rgba(79, 209, 197, 0.08);
+}
+.btn-install::before {
+  content: '⤓';
+  margin-right: 10px;
+  font-size: 1.05em;
+  vertical-align: -0.05em;
+}
+.btn-install[hidden] { display: none; }
+
+.menu-note {
+  margin: -4px 0 0;
+  color: var(--text-dim);
+  font-size: clamp(10px, 1.3vmin, 12px);
+  letter-spacing: 0.06em;
+  text-align: center;
+  z-index: 2;
+}
+
 .menu-foot {
   display: flex;
   gap: 18px;

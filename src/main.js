@@ -36,6 +36,7 @@ import { loadSettings, saveSettings, sanitize } from './ui/settings.js';
 import GUI from 'lil-gui';
 import { WEAPONS as TUNING_WEAPONS, DIFFICULTY as TUNING_DIFFICULTY, PLAYER as TUNING_PLAYER, COMBAT as TUNING_COMBAT } from './core/config.js';
 import { setDifficulty } from './core/game.js';
+import { registerServiceWorker, createInstallControls } from './ui/pwa.js';
 
 
 const $ = (id) => document.getElementById(id);
@@ -100,6 +101,11 @@ function boot() {
 
   bindUI();
   bindInput(canvas);
+
+  // Installed-app support. On file:// this is a no-op, so the offline
+  // single-file build keeps working exactly as before.
+  setupInstallControls();
+  registerServiceWorker();
   window.addEventListener('resize', onResize);
   onResize();
 
@@ -334,6 +340,10 @@ function bindUI() {
       case 'rematch':
         startMatchFlow(app.settings.difficulty);
         break;
+      case 'install':
+        // The button has its own click handler; stop the nav handler from
+        // firing a second prompt.
+        break;
       case 'quit':
         quitGame();
         break;
@@ -535,8 +545,25 @@ function isPointerLocked() {
 }
 
 function quitGame() {
+  // Desktop build: the preload bridge can close the window for real.
+  const desktop = window.SIFIR_NOKTA_DESKTOP;
+  if (desktop && desktop.isDesktop) {
+    desktop.quit();
+    return;
+  }
   if (typeof window.close === 'function') window.close();
   showToast('Tarayıcı penceresi kapatılamadı. Sekmeyi kapatabilirsin.', 3000);
+}
+
+// -------------------------------------------------------- install (PWA) ---
+// The browser decides whether the game may be installed; src/ui/pwa.js owns
+// that logic (and its tests). Here we only pass in the DOM and the toast.
+function setupInstallControls() {
+  app.installControls = createInstallControls({
+    button: $('install-btn'),
+    hint: $('install-hint'),
+    notify: (message) => showToast(message, 2600),
+  });
 }
 
 let toastTimer = 0;
