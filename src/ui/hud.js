@@ -188,7 +188,7 @@ export function createHud() {
         lastKillfeedKey = key;
         el.killfeed.innerHTML = '';
         for (const k of p.killfeed) {
-          const d = document.createElement('div');
+          const d = document.createElement('li');
           d.className = k.team === 'A' ? 'a' : 'b';
           d.textContent = k.text;
           el.killfeed.appendChild(d);

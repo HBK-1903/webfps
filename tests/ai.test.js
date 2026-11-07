@@ -248,6 +248,8 @@ test('a bot turns toward its target instead of away from it', () => {
   // Guards against a sign error in the yaw/pitch math: bots must converge on the
   // target angle (the shortest angular error shrinks to ~0), never diverge.
   const { match, bot } = makeDuel('normal', 99);
+  // Start clearly off-target (~46°) so convergence is measurable.
+  bot.yaw = -Math.PI / 2 + 0.8;
   const errors = [];
   for (let i = 0; i < 180; i++) {
     match.time += 1 / 60;
@@ -255,8 +257,13 @@ test('a bot turns toward its target instead of away from it', () => {
     if (bot.brain.targetVisible && Number.isFinite(bot.brain.lastTurnError)) errors.push(Math.abs(bot.brain.lastTurnError));
   }
   assert.ok(errors.length > 30, 'the bot should have been tracking for a while');
-  const first = errors.slice(0, 10).reduce((a, b) => a + b, 0) / 10;
-  const last = errors.slice(-10).reduce((a, b) => a + b, 0) / 10;
+  // The bot starts off-target and must converge: compare the whole first third
+  // with the whole last third so a single noisy frame cannot flip the result.
+  const third = Math.max(1, Math.floor(errors.length / 3));
+  const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const first = avg(errors.slice(0, third));
+  const last = avg(errors.slice(-third));
+  assert.ok(first > 0.05, `the duel should start off-target (start ${first.toFixed(3)} rad)`);
   assert.ok(last < first, `aim error must shrink (start ${first.toFixed(3)} rad, end ${last.toFixed(3)} rad)`);
   assert.ok(last < 0.35, `bot should end up roughly on target (error ${last.toFixed(3)} rad)`);
 });

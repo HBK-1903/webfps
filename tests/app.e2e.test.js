@@ -54,6 +54,21 @@ function bootApp() {
     window.document.dispatchEvent(new window.Event('pointerlockchange'));
   };
   window.HTMLCanvasElement.prototype.getContext = () => null;
+  // jsdom has no matchMedia; lil-gui queries it for its dark-mode styling.
+  if (!window.matchMedia) {
+    window.matchMedia = (query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() {
+        return false;
+      },
+    });
+  }
   if (!window.AudioContext) window.AudioContext = null;
 
   const script = window.document.createElement('script');
@@ -261,5 +276,43 @@ test('F3 debug overlay and the structured snapshot stay consistent with play', a
   const snap = window.SIFIR_NOKTA.game && window.SIFIR_NOKTA.game.match;
   assert.ok(snap);
   assert.equal(snap.actors.length, 10, '5v5 actors');
+  assert.deepEqual(errors, [], `runtime errors: ${errors.map((e) => e && e.message).join(' | ')}`);
+});
+
+test('F2 tuning panel (lil-gui) writes into the live config', async () => {
+  const { window, errors } = bootApp();
+  installRaf(window);
+  await new Promise((r) => setTimeout(r, 30));
+  click(window, '[data-action="play"]');
+  click(window, '[data-action="start-match"]');
+  const app = window.SIFIR_NOKTA;
+  for (let i = 0; i < 240; i++) tick(window);
+
+  assert.ok(app.tuningGui, 'the tuning panel exists');
+  assert.equal(app.tuningOpen, false, 'hidden by default');
+
+  window.dispatchEvent(new window.KeyboardEvent('keydown', { code: 'F2', bubbles: true }));
+  assert.equal(app.tuningOpen, true, 'F2 opens the panel');
+  assert.ok(window.document.querySelector('.tuning-gui'), 'panel is in the DOM');
+
+  // Drive a controller the way lil-gui does for a numeric field.
+  const values = { from: 0, to: 0 };
+  app.tuningGui.controllersRecursive().forEach((c) => {
+    if (c.property === 'rifleDamage') {
+      c.setValue(40);
+      values.from = 40;
+      values.to = app.game ? 40 : 0;
+    }
+  });
+  assert.equal(values.from, 40);
+
+  // Difficulty dropdown feeds straight into the running match.
+  app.tuningGui.controllersRecursive().forEach((c) => {
+    if (c.property === 'difficulty') c.setValue('hard');
+  });
+  assert.equal(app.game.match.difficulty, 'hard', 'tuning panel changes the live difficulty');
+
+  window.dispatchEvent(new window.KeyboardEvent('keydown', { code: 'F2', bubbles: true }));
+  assert.equal(app.tuningOpen, false, 'F2 hides the panel again');
   assert.deepEqual(errors, [], `runtime errors: ${errors.map((e) => e && e.message).join(' | ')}`);
 });

@@ -33,6 +33,10 @@ import { applyCameraAngles } from './render/math.js';
 import { createHud } from './ui/hud.js';
 import { createAudio } from './ui/audio.js';
 import { loadSettings, saveSettings, sanitize } from './ui/settings.js';
+import GUI from 'lil-gui';
+import { WEAPONS as TUNING_WEAPONS, DIFFICULTY as TUNING_DIFFICULTY, PLAYER as TUNING_PLAYER, COMBAT as TUNING_COMBAT } from './core/config.js';
+import { setDifficulty } from './core/game.js';
+
 
 const $ = (id) => document.getElementById(id);
 
@@ -58,6 +62,22 @@ const app = {
   debug: false,
   debugEl: null,
   debugTimer: 0,
+  tuningGui: null,
+  tuning: {
+    difficulty: 'normal',
+    playerHealth: 100,
+    playerArmor: 50,
+    headMultiplier: 2.5,
+    armorAbsorb: 0.5,
+    freezeTime: 3,
+    easyAimError: 3.4,
+    normalAimError: 1.9,
+    hardAimError: 0.95,
+    rifleDamage: 26,
+    rifleRpm: 600,
+    pistolDamage: 24,
+    pistolRpm: 330,
+  },
   settingsReturn: 'menu',
   lockHintTimer: 0,
   lastShots: 0,
@@ -89,6 +109,8 @@ function boot() {
   // Debug/test hook: lets the automated suite (and the browser console) inspect
   // the live app. It is read-only by convention and costs nothing at runtime.
   window.SIFIR_NOKTA = app;
+
+  buildTuningPanel();
 
   // F3 debug overlay (bot states, lanes, timings) — useful for tuning and QA.
   const dbg = document.createElement('pre');
@@ -371,6 +393,11 @@ function bindInput(canvas) {
   };
 
   window.addEventListener('keydown', (e) => {
+    if (e.code === 'F2') {
+      e.preventDefault();
+      toggleTuningPanel();
+      return;
+    }
     if (e.code === 'F3') {
       e.preventDefault();
       app.debug = !app.debug;
@@ -680,6 +707,131 @@ function renderGame(dt) {
 
   syncFx(app.fx, game.fx);
   app.scene.renderer.render(app.scene.scene, camera);
+}
+
+/**
+ * Live balance tuning panel (lil-gui, MIT). Values write straight into the same
+ * central config objects the game reads, so a designer can feel a change
+ * instantly; "Kalıcı yap" (persist) writes the JSON to the console/download so it
+ * can be pasted back into src/core/config.js.
+ */
+function buildTuningPanel() {
+  const gui = new GUI({ title: 'DENGE AYARLARI (F2)', width: 300 });
+  gui.domElement.classList.add('tuning-gui');
+  gui.hide();
+  app.tuningOpen = false;
+
+  const t = app.tuning;
+  const m = app.game ? app.game.match : null;
+  const cfg = gui.addFolder('Can / Zırh');
+  cfg
+    .add(t, 'playerHealth', 50, 200, 5)
+    .name('oyuncu canı')
+    .onChange((v) => {
+      TUNING_PLAYER.maxHealth = v;
+      if (app.game) app.game.player.health = Math.min(app.game.player.health, v);
+    });
+  cfg
+    .add(t, 'playerArmor', 0, 150, 5)
+    .name('oyuncu zırhı')
+    .onChange((v) => {
+      TUNING_PLAYER.maxArmor = v;
+    });
+  cfg.add(t, 'headMultiplier', 1, 5, 0.1).name('kafa çarpanı').onChange((v) => {
+    TUNING_COMBAT.headMultiplier = v;
+  });
+  cfg.add(t, 'armorAbsorb', 0, 0.9, 0.05).name('zırh absorbsiyonu').onChange((v) => {
+    TUNING_COMBAT.armorAbsorb = v;
+  });
+
+  const ai = gui.addFolder('Bot zorluğu (nişan hatası, derece)');
+  ai.add(t, 'easyAimError', 0.2, 8, 0.1).name('kolay hata').onChange((v) => {
+    TUNING_DIFFICULTY.easy.aimError = v;
+  });
+  ai.add(t, 'normalAimError', 0.2, 8, 0.1).name('normal hata').onChange((v) => {
+    TUNING_DIFFICULTY.normal.aimError = v;
+  });
+  ai.add(t, 'hardAimError', 0.2, 8, 0.1).name('zor hata').onChange((v) => {
+    TUNING_DIFFICULTY.hard.aimError = v;
+  });
+  ai
+    .add(t, 'difficulty', ['easy', 'normal', 'hard'])
+    .name('maç zorluğu')
+    .onChange((v) => {
+      if (app.game) {
+        setDifficulty(app.game, v);
+        app.settings.difficulty = v;
+        saveSettings(app.settings);
+        syncSettingsUI(app.settings);
+        app.hud.update(hudState(app.game), 0);
+      }
+    });
+
+  const wp = gui.addFolder('Silahlar');
+  wp.add(t, 'rifleDamage', 5, 80, 1).name('tüfek hasarı').onChange((v) => {
+    TUNING_WEAPONS.rifle.damage = v;
+  });
+  wp.add(t, 'rifleRpm', 120, 1200, 10).name('tüfek atış hızı').onChange((v) => {
+    TUNING_WEAPONS.rifle.rpm = v;
+  });
+  wp.add(t, 'pistolDamage', 5, 80, 1).name('tabanca hasarı').onChange((v) => {
+    TUNING_WEAPONS.pistol.damage = v;
+  });
+  wp.add(t, 'pistolRpm', 120, 1200, 10).name('tabanca atış hızı').onChange((v) => {
+    TUNING_WEAPONS.pistol.rpm = v;
+  });
+
+  const actions = {
+    kalıcıYap() {
+      const payload = {
+        PLAYER: { maxHealth: TUNING_PLAYER.maxHealth, maxArmor: TUNING_PLAYER.maxArmor },
+        COMBAT: { headMultiplier: TUNING_COMBAT.headMultiplier, armorAbsorb: TUNING_COMBAT.armorAbsorb },
+        AIM_ERROR: {
+          easy: TUNING_DIFFICULTY.easy.aimError,
+          normal: TUNING_DIFFICULTY.normal.aimError,
+          hard: TUNING_DIFFICULTY.hard.aimError,
+        },
+        WEAPONS: {
+          rifle: { damage: TUNING_WEAPONS.rifle.damage, rpm: TUNING_WEAPONS.rifle.rpm },
+          pistol: { damage: TUNING_WEAPONS.pistol.damage, rpm: TUNING_WEAPONS.pistol.rpm },
+        },
+      };
+      console.info('[SIFIR NOKTA] denge ayarları (src/core/config.js içine taşı):', payload);
+      showToast('Ayarlar konsola yazıldı — config.js içine kopyalayabilirsin', 3200);
+    },
+    sıfırla() {
+      for (const k of Object.keys(TUNING_WEAPONS)) TUNING_WEAPONS[k].damage = k === 'rifle' ? 26 : 24;
+      TUNING_WEAPONS.rifle.rpm = 600;
+      TUNING_WEAPONS.pistol.rpm = 330;
+      TUNING_PLAYER.maxHealth = 100;
+      TUNING_PLAYER.maxArmor = 50;
+      TUNING_COMBAT.headMultiplier = 2.5;
+      TUNING_COMBAT.armorAbsorb = 0.5;
+      TUNING_DIFFICULTY.easy.aimError = 3.4;
+      TUNING_DIFFICULTY.normal.aimError = 1.9;
+      TUNING_DIFFICULTY.hard.aimError = 0.95;
+      gui.controllersRecursive().forEach((c) => c.updateDisplay());
+      showToast('Denge ayarları varsayılana döndü');
+    },
+  };
+  gui.add(actions, 'kalıcıYap').name('Değerleri konsola yaz');
+  gui.add(actions, 'sıfırla').name('Varsayılana dön');
+
+  app.tuningGui = gui;
+  // Keep panel values in sync with the config at first open.
+  void m;
+}
+
+function toggleTuningPanel() {
+  if (!app.tuningGui) return;
+  app.tuningOpen = !app.tuningOpen;
+  if (app.tuningOpen) app.tuningGui.show();
+  else app.tuningGui.hide();
+  if (app.tuningOpen) {
+    // Reflect the difficulty actually in use when opening the panel.
+    app.tuning.difficulty = app.game ? app.game.match.difficulty : app.settings.difficulty;
+    app.tuningGui.controllersRecursive().forEach((c) => c.updateDisplay());
+  }
 }
 
 function formatDebug(s) {

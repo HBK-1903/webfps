@@ -18,7 +18,9 @@ Tüm lisans bilgileri 7 Kasım 2026'da GitHub API üzerinden doğrulandı.
 | [esbuild](https://github.com/evanw/esbuild) | MIT | `build.mjs` → `dist/SifirNokta.html` | Tüm oyunu ~0.1 s'de tek dosyaya indiriyor (offline oynanabilir artifact) |
 | [jsdom](https://github.com/jsdom/jsdom) | MIT | `tests/ui.test.js`, `tests/app.e2e.test.js`, `tools/qa.mjs` | Gerçek `src/main.js`'i tarayıcısız çalıştırıp menü→maç→duraklatma→maç sonu akışını test etmek |
 | [ESLint](https://github.com/eslint/eslint) + `@eslint/js` | MIT | `npm run lint` | 14 gerçek hata yakaladı (kullanılmayan importlar, kendine atama, tanımsız değişken, ölü kod) |
-| [Node.js test runner](https://nodejs.org/api/test.html) | MIT | `npm test` (81 test) | Ek bağımlılık yok, `node:test` + `node:assert` yeterli |
+| [Node.js test runner](https://nodejs.org/api/test.html) | MIT | `npm test` (85 test) | Ek bağımlılık yok, `node:test` + `node:assert` yeterli |
+| [lil-gui](https://github.com/georgealways/lil-gui) ★1.6k | MIT | `src/main.js` → **F2 denge paneli** | Dat.GUI'nin bakımlı, bağımlılıksız devamı. Denge değerlerini (hasar, can, nişan hatası, zorluk) oyun içinde canlı değiştirmek için — şartnamenin "ayarlanabilir veri" isteğine doğrudan hizmet ediyor. `npm run build` bunu da tek dosyaya gömüyor. |
+| [axe-core](https://github.com/dequelabs/axe-core) ★7.8k | MPL-2.0 | `tools/a11y.mjs` → `npm run a11y` | WCAG 2.1 A/AA taraması (jsdom, gerçek markup). **6 ekranda 18 ihlal → 0 ihlal**: landmark/rol hataları (dialog, main, nav, log) ve h2 başlık kimlikleri düzeltildi. Lisans gereği axe yalnızca geliştirme bağımlılığıdır, üretim build'ine girmez (MPL uyumu). |
 | [agency-agents](https://github.com/msitarzewski/agency-agents) | MIT | Bu iş akışının organizasyonu (QA/regresyon katmanı) | Ajansın "her uzman ayrı sorumluluk" fikri → `tools/qa.mjs` ile otomatik **QA ajanı** katmanı: senaryoları koşup `docs/QA-REPORT.md` üretir |
 | [project-based-learning](https://github.com/practical-tutorials/project-based-learning) | MIT | `README.md` §8 (Unity'ye taşıma notları) | "Önce çalışan çekirdek, sonra motor" yaklaşımı ve motor eşleme tablosunun dayanağı |
 | [public-apis](https://github.com/public-apis/public-apis) | MIT | **Bilinçli olarak kullanılmadı** (aşağıya bakın) | Oyun çevrimdışı ve hesapsız olmalı |
@@ -61,3 +63,8 @@ Ek olarak değerlendirilen FPS referansları (kod kopyalanmadı, yalnızca yakla
   `pushAfter` merkezi parametresi). Sonuç: kolayda tıkanma %72 → %39, normal %31 → %25, zor %35 → %27.
 - **FPS referansları** → pointer-lock + `unadjustedMovement` geri düşüşü ve `movementX/Y` tabanlı bakış
   yaklaşımı doğrulandı (kod kopyalanmadı).
+- **lil-gui** → oyun içi denge paneli (F2). Değerler doğrudan `config.js` nesnelerine yazıldığı için
+  "ayarla → hisset" döngüsü saniyeler sürüyor; "Değerleri konsola yaz" ile config'e geri taşınabiliyor.
+- **axe-core** → erişilebilirlik kapısı. Elle yazılmış işaretlemedeki gerçek hataları buldu:
+  ekranların landmark'ı yoktu, dialog rolleri ve `aria-labelledby` hedefleri eksikti, killfeed
+  `role="log"` değildi. Hepsi düzeltildi ve `npm run verify` artık bunu zorunlu tutuyor.

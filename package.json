@@ -11,18 +11,21 @@
     "sim": "node tools/sim.mjs",
     "build": "node build.mjs",
     "lint": "eslint src tools tests build.mjs",
-    "verify": "npm run lint && npm test && npm run build",
+    "verify": "npm run lint && npm test && npm run a11y && npm run build",
     "qa": "node tools/qa.mjs",
-    "matrix": "node tools/matrix.mjs"
+    "matrix": "node tools/matrix.mjs",
+    "a11y": "node tools/a11y.mjs --strict"
   },
   "dependencies": {
     "three": "0.169.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "axe-core": "^4.14.0",
     "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
-    "jsdom": "^31.0.0"
+    "jsdom": "^31.0.0",
+    "lil-gui": "^0.20.0"
   },
   "engines": {
     "node": ">=20"

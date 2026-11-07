@@ -217,6 +217,13 @@ function bootApp(code) {
   const { window } = dom;
   window.addEventListener('error', (e) => errors.push(e.error || e.message));
   window.HTMLCanvasElement.prototype.getContext = () => null;
+  if (!window.matchMedia) {
+    window.matchMedia = (query) => ({
+      matches: false, media: query, onchange: null,
+      addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {},
+      dispatchEvent() { return false; },
+    });
+  }
   window.HTMLCanvasElement.prototype.requestPointerLock = function lock() {
     Object.defineProperty(window.document, 'pointerLockElement', { value: this, configurable: true });
     window.document.dispatchEvent(new window.Event('pointerlockchange'));

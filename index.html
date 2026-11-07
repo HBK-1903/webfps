@@ -6,13 +6,14 @@
     <meta name="color-scheme" content="dark" />
     <title>SIFIR NOKTA — Taktik Eğitim Tesisi</title>
     <link rel="stylesheet" href="./src/ui/styles.css" />
+    <link rel="stylesheet" href="./node_modules/lil-gui/dist/lil-gui.css" />
   </head>
   <body>
     <div id="app">
-      <canvas id="view"></canvas>
+      <canvas id="view" aria-label="Oyun görüntüsü" role="main"></canvas>
 
       <!-- ===================== IN-GAME HUD ===================== -->
-      <div id="hud" class="hud hidden" aria-hidden="true">
+      <div id="hud" class="hud hidden" aria-hidden="true" role="region" aria-label="Oyun bilgileri">
         <div class="hud-top">
           <div class="team-panel team-a">
             <div class="team-name">ALFA</div>
@@ -39,9 +40,9 @@
           </div>
         </div>
 
-        <div id="banner" class="banner hidden"></div>
+        <div id="banner" class="banner hidden" role="status" aria-live="polite"></div>
 
-        <div id="killfeed" class="killfeed"></div>
+        <ul id="killfeed" class="killfeed" role="log" aria-live="polite" aria-label="Eleme bildirimleri"></ul>
 
         <div class="hud-bottom">
           <div class="vitals">
@@ -89,25 +90,25 @@
           </div>
         </div>
 
-        <div id="damage-vignette" class="damage-vignette"></div>
-        <div id="damage-dir" class="damage-dir"></div>
+        <div id="damage-vignette" class="damage-vignette" aria-hidden="true"></div>
+        <div id="damage-dir" class="damage-dir" aria-hidden="true"></div>
         <div id="death-overlay" class="death-overlay hidden">
           <div class="death-title">ELENDİN</div>
           <div id="death-sub" class="death-sub">Raund devam ediyor…</div>
         </div>
-        <div id="fps" class="fps">60 FPS</div>
+        <div id="fps" class="fps" aria-hidden="true">60 FPS</div>
         <div id="difficulty-tag" class="difficulty-tag">NORMAL</div>
       </div>
 
       <!-- ===================== MAIN MENU ===================== -->
-      <div id="menu" class="screen menu-screen">
+      <div id="menu" class="screen menu-screen" role="region" aria-label="Ana menü">
         <div class="menu-bg-grid" aria-hidden="true"></div>
         <header class="menu-head">
           <h1 class="title">SIFIR<span>NOKTA</span></h1>
           <p class="subtitle">TAKTİK EĞİTİM TESİSİ — ÇEVRİMDIŞI 5v5</p>
         </header>
 
-        <nav class="menu-nav">
+        <nav class="menu-nav" aria-label="Ana menü seçenekleri">
           <button class="btn btn-primary" data-action="play">OYNA</button>
           <button class="btn" data-action="settings">AYARLAR</button>
           <button class="btn" data-action="controls">KONTROLLER</button>
@@ -121,9 +122,9 @@
       </div>
 
       <!-- ===================== DIFFICULTY ===================== -->
-      <div id="difficulty-screen" class="screen overlay hidden">
+      <div id="difficulty-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="difficulty-title">
         <div class="panel">
-          <h2>ZORLUK SEÇ</h2>
+          <h2 id="difficulty-title">ZORLUK SEÇ</h2>
           <p class="panel-sub">Botların tepki süresi, nişan kalitesi ve takım uyumu değişir. Görüş hattı kuralları her seviyede aynıdır.</p>
           <div class="difficulty-grid">
             <button class="diff-card" data-difficulty="easy">
@@ -148,9 +149,9 @@
       </div>
 
       <!-- ===================== SETTINGS ===================== -->
-      <div id="settings-screen" class="screen overlay hidden">
+      <div id="settings-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="panel wide">
-          <h2>AYARLAR</h2>
+          <h2 id="settings-title">AYARLAR</h2>
           <div class="settings-grid">
             <label class="setting">
               <span class="setting-label">FARE HASSASİYETİ <b id="sense-value">1.00</b></span>
@@ -185,9 +186,9 @@
       </div>
 
       <!-- ===================== CONTROLS ===================== -->
-      <div id="controls-screen" class="screen overlay hidden">
+      <div id="controls-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="controls-title">
         <div class="panel wide">
-          <h2>KONTROLLER</h2>
+          <h2 id="controls-title">KONTROLLER</h2>
           <div class="controls-grid">
             <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Hareket</span></div>
             <div><kbd>Fare</kbd><span>Bakış</span></div>
@@ -207,9 +208,9 @@
       </div>
 
       <!-- ===================== PAUSE ===================== -->
-      <div id="pause-screen" class="screen overlay hidden">
+      <div id="pause-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
         <div class="panel">
-          <h2>DURAKLATILDI</h2>
+          <h2 id="pause-title">DURAKLATILDI</h2>
           <p class="panel-sub">Oyun zamanı, botlar ve ateş durduruldu.</p>
           <div class="panel-actions column">
             <button class="btn btn-primary" data-action="resume">DEVAM</button>
@@ -221,7 +222,7 @@
       </div>
 
       <!-- ===================== MATCH END ===================== -->
-      <div id="match-end-screen" class="screen overlay hidden">
+      <div id="match-end-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="match-end-title">
         <div class="panel">
           <h2 id="match-end-title">MAÇ BİTTİ</h2>
           <p id="match-end-score" class="panel-sub">3 - 1</p>
@@ -233,8 +234,8 @@
         </div>
       </div>
 
-      <div id="toast" class="toast hidden"></div>
-      <div id="lock-hint" class="lock-hint hidden">Devam etmek için tıkla</div>
+      <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+      <div id="lock-hint" class="lock-hint hidden" role="status">Devam etmek için tıkla</div>
     </div>
 
     <!-- Dev mode resolves the bare "three" specifier; the production build

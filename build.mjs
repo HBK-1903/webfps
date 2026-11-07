@@ -23,15 +23,15 @@ await esbuild.build({
 });
 
 let html = readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-const css = readFileSync(path.join(ROOT, 'src/ui/styles.css'), 'utf8');
+const cssFiles = ['src/ui/styles.css', 'node_modules/lil-gui/dist/lil-gui.css'];
+const css = cssFiles.map((f) => readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
 const js = readFileSync(path.join(DIST, 'sifir-nokta.min.js'), 'utf8');
 
 // Inline the stylesheet. Replacement *functions* are mandatory here: the
 // minified bundle is full of `$` sequences that String.replace would expand.
-html = html.replace(
-  /<link rel="stylesheet" href="\.\/src\/ui\/styles\.css" \/>/,
-  () => `<style>\n${css}\n</style>`,
-);
+html = html.replace(/<link rel="stylesheet" href="\.\/src\/ui\/styles\.css" \/>/, () => `<style>\n${css}\n</style>`);
+html = html.replace(/<link rel="stylesheet" href="\.\/node_modules\/lil-gui\/dist\/lil-gui\.css" \/>/, () => '');
+
 // Drop the dev import map and inline the bundle instead of the module entry.
 html = html.replace(/\s*<!-- Dev mode[\s\S]*?<\/script>\s*/, () => '\n');
 html = html.replace(

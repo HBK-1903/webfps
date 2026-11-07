@@ -60,6 +60,7 @@ npm run sim -- normal 7 3   # zorluk, seed, maç sayısı ile headless maç sim�
 | `Shift` | Koşma |
 | `Ctrl` | Çömelme |
 | `Esc` | Duraklat / devam |
+| `F2` | Denge ayar paneli — can/zırh/kafa çarpanı, bot nişan hatası, silah hasarı/atış hızı canlı ayarlanır |
 | `F3` | Hata ayıklama katmanı (bot durumları, şeritler, konumlar, zamanlar) |
 | Pencere odağı kaybı | Otomatik duraklatma (input ve botlar durur) |
 
@@ -240,7 +241,9 @@ Oynanış sizin tarafınızda önizlemede/`dist` dosyasında doğrulanmalı.
 - Görsel kalite "yüksek" ayarında gölge açılır; entegre GPU'larda FPS düşebilir (kalite ayarı düşürülebilir).
 - Ses sentetik olduğu için gerçek silah kayıtları kadar zengin değil.
 - Pointer lock tarayıcı tarafından Esc ile bırakılırsa oyun otomatik duraklar (tarayıcı davranışı).
-- Ekran okuyucu/erişilebilirlik ve gamepad desteği kapsam dışı.
+- **Erişilebilirlik kısmi:** menüler/diyaloglar axe-core WCAG 2.1 A/AA taramasından 0 ihlalle geçiyor
+  (landmark, dialog rolü, canlı bölgeler). Ancak bir FPS'in oynanışı fare+klavye gerektirir; ekran
+  okuyucuyla oynanabilir bir nişancı deneyimi hedeflenmedi. Gamepad desteği kapsam dışı.
 - **Hareketsiz oynayan kazanmaz:** oyuncu ölü/hareketsiz kaldığında takımı 4 botla 5 bota karşı kalır;
   bu yüzden "hiçbir şey yapmama" oranı düşüktür (bkz. `npm run matrix`). Bilinçli bir tasarım sonucudur.
 
@@ -267,14 +270,28 @@ tasarım değil, yeniden *uygulama* gerekir.
 
 ---
 
-## 9. Proje içi araçlar
+## 9. Denge ayar paneli (F2)
+
+Oyun içinde `F2` ile açılan [lil-gui](https://github.com/georgealways/lil-gui) paneli, aşağıdaki değerleri
+**çalışan maça** anında yazar:
+
+- Oyuncu canı / zırhı, kafa çarpanı, zırh absorbsiyonu
+- Kolay / Normal / Zor nişan hatası (derece) ve maç zorluğu (anında tüm botlara uygulanır)
+- Tüfek/tabanca hasarı ve atış hızı (rpm)
+
+"Değerleri konsola yaz" düğmesi seçili değerleri `src/core/config.js` içine taşıyabileceğin JSON olarak
+yazdırır; "Varsayılana dön" fabrika denge değerlerini geri yükler. Panel yalnızca geliştirici kolaylığıdır,
+oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı aynı kalır).
+
+## 10. Proje içi araçlar
 
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
 | `npm test` | 81 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
-| `npm run verify` | lint + test + build |
+| `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
+| `npm run verify` | lint + test + a11y + build |
 | `npm run build` | Tek dosya offline build (`dist/SifirNokta.html`) |
 | `npm run qa` | Senaryolu playtest + `docs/QA-REPORT.md` (JSON: `node tools/qa.mjs --json`) |
 | `npm run matrix` | Denge matrisi: zorluk × oyuncu modu, kazanma/tıkanma oranları (`docs/qa-matrix.json`) |
@@ -282,16 +299,17 @@ tasarım değil, yeniden *uygulama* gerekir.
 
 İncelenip değerlendirilen GitHub kaynakları (ve bilinçli olarak alınmayanlar): [`docs/KAYNAKLAR.md`](docs/KAYNAKLAR.md).
 
-## 10. Lisans / varlıklar
+## 11. Lisans / varlıklar
 
 - Tüm kod bu depo için yazıldı. Harita, modeller ve silahlar primitif mesh'lerden üretildi.
-- Tek üçüncü taraf bağımlılık: **three.js** (MIT) — üretim build'ine gömülü.
-- Geliştirme bağımlılıkları: esbuild (MIT), jsdom (MIT).
+- Üretim bağımlılıkları: **three.js** (MIT) ve **lil-gui** (MIT) — ikisi de tek dosya build'e gömülü.
+- Geliştirme bağımlılıkları: esbuild (MIT), jsdom (MIT), ESLint (MIT), **axe-core** (MPL-2.0; yalnızca
+  geliştirme aracı olarak kullanılır, üretim dosyasına girmez).
 - Ses tamamen prosedürel; hiçbir ses dosyası/örnek yok. Ticari oyun asset'i kullanılmadı.
 
 ---
 
-## 11. Kapsam dışı bırakılanlar (bilinçli)
+## 12. Kapsam dışı bırakılanlar (bilinçli)
 
 Şartname MVP dışını istemedi; aşağıdakiler **eklenmedi**: bomba kurma/çözme, satın alma/ekonomi,
 çok oyunculu/online, hesap sistemi, ilerleme/kariyer kaydı, el bombası, revive, gamepad desteği,
