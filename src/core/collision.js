@@ -40,7 +40,7 @@ export function circleOverlapsBox(x, z, radius, b) {
  * the actor's step height are treated as low cover the actor simply walks on
  * top of? No: this game is flat-floor only, every box is a full obstacle.
  */
-export function resolveCircle(x, z, radius, boxes, skipBoxes, hitOut) {
+export function resolveCircle(x, z, radius, boxes, skipBoxes) {
   let px = x;
   let pz = z;
   let hit = false;
@@ -49,7 +49,6 @@ export function resolveCircle(x, z, radius, boxes, skipBoxes, hitOut) {
     const b = boxes[i];
     if (!circleOverlapsBox(px, pz, radius, b)) continue;
     hit = true;
-    if (hitOut) hitOut.push({ kind: b.kind, minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ });
     const cx = Math.min(Math.max(px, b.minX), b.maxX);
     const cz = Math.min(Math.max(pz, b.minZ), b.maxZ);
     const dx = px - cx;
@@ -76,7 +75,7 @@ export function resolveCircle(x, z, radius, boxes, skipBoxes, hitOut) {
 }
 
 /** Move a circle by (dx,dz) with sliding, sub-stepped so fast moves don't tunnel. */
-export function moveCircle(x, z, dx, dz, radius, boxes, hitOut) {
+export function moveCircle(x, z, dx, dz, radius, boxes) {
   const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / (radius * 0.75)));
   let px = x;
   let pz = z;
@@ -85,10 +84,10 @@ export function moveCircle(x, z, dx, dz, radius, boxes, hitOut) {
   let blocked = false;
   for (let i = 0; i < steps; i++) {
     // Axis-separated moves give natural wall sliding.
-    const r1 = resolveCircle(px + sx, pz, radius, boxes, undefined, hitOut);
+    const r1 = resolveCircle(px + sx, pz, radius, boxes);
     px = r1.x;
     pz = r1.z;
-    const r2 = resolveCircle(px, pz + sz, radius, boxes, undefined, hitOut);
+    const r2 = resolveCircle(px, pz + sz, radius, boxes);
     px = r2.x;
     pz = r2.z;
     if (r1.hit || r2.hit) blocked = true;
