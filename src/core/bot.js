@@ -7,7 +7,7 @@ import { moveCircle, losClear } from './collision.js';
 import { eyePoint, bodyRadius, hitVolumes } from './actor.js';
 import { directionFromAngles, performShot, anglesTo, castShot } from './combat.js';
 import { activeWeapon, updateWeapon, startReload, tryShoot, releaseTrigger, switchWeapon, cancelReload } from './weapon.js';
-import { ROUTES, ENEMY_SPAWN_AREA } from './map.js';
+import { ROUTES, ENEMY_SPAWN_AREA, SPAWNS, laneForMirroredSlot } from './map.js';
 import { getCoverPoints, pickCoverFor, hiddenFrom } from './cover.js';
 import { registerDamage } from './match.js';
 
@@ -255,15 +255,26 @@ export function refreshHuntZones(coordinator, grid, rng, match) {
   }
 }
 
-// The map is 180° rotationally symmetric, so "north" for ALFA is the mirror of
-// "south" for BRAVO. Lane assignment must be rotated for team B as well,
-// otherwise one team ends up numerically stronger in mid.
-const LANE_PATTERN = ['mid', 'north', 'south', 'mid', 'north'];
-const ROTATE_LANE = { mid: 'mid', north: 'south', south: 'north' };
-
-export function laneForSlot(team, index) {
-  const base = LANE_PATTERN[index % LANE_PATTERN.length];
-  return team === 'B' ? ROTATE_LANE[base] : base;
+// Lane assignment lives in map.js next to ROUTES, because whether two lanes are
+// mirror images is a map fact, not an AI decision. Keep the derivation here so
+// the AI still records each bot's slot for jitter/spread purposes.
+//
+// The slot must come from the spawn row, never from `actor.index`: the human
+// player occupies ALFA's index 0, so index-based slots pushed every ALFA bot one
+// slot up and put every BRAVO bot on slot 0.
+export function laneSlot(actor) {
+  const row = SPAWNS[actor.team];
+  if (!row || !Number.isFinite(actor.spawnZ)) return 0;
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < row.length; i++) {
+    const d = Math.abs(row[i].z - actor.spawnZ);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
 }
 
 /**
@@ -289,9 +300,9 @@ export function assignLanes(match, coordinator) {
   for (const team of ['A', 'B']) {
     const bots = match.actors.filter((a) => a.team === team && a.brain);
     coordinator.lanes[team] = {};
-    const order = bots.slice().sort((a, b) => a.index - b.index);
+    const order = bots.slice().sort((a, b) => laneSlot(a) - laneSlot(b));
     for (const bot of order) {
-      const lane = laneForSlot(team, bot.index);
+      const lane = laneForMirroredSlot(team, laneSlot(bot));
       bot.brain.lane = lane;
       coordinator.lanes[team][bot.id] = lane;
     }
@@ -326,8 +337,15 @@ export function aimPoint(bot, target) {
   const base = profile ? headBias(profile) : 0.2;
   const bias = Math.min(1, base + 0.2 * base * (bot.brain ? bot.brain.aimRamp : 0));
   // Actors have no y field: they stand on the floor, so heights are absolute.
+  // The chest height is interpolated through the crouch blend rather than
+  // snapped at a threshold: `crouch` ramps from 0 to 1 over ~100ms, and a hard
+  // `crouch > 0.5` test made the whole aim point jump ~34 cm in one frame the
+  // instant a target crossed the midpoint — a bot would miss high for that
+  // frame no matter how well it was tracking.
   const eyeY = eyePoint(target).y;
-  const chestY = target.crouch > 0.5 ? 0.78 : 1.12;
+  const standingChest = PLAYER.chestHeight;
+  const crouchedChest = PLAYER.crouchChestHeight;
+  const chestY = standingChest + (crouchedChest - standingChest) * target.crouch;
   return { x: target.x, y: chestY + (eyeY - chestY) * bias, z: target.z };
 }
 
@@ -411,8 +429,9 @@ function advanceGoal(bot, grid) {
   const lane = brain.lane;
   const route = routePoint(bot, lane, brain.laneIndex);
   if (!route) return null;
-  const jitterX = ((bot.index % 3) - 1) * 1.6;
-  const jitterZ = (bot.index % 2 === 0 ? 1 : -1) * 1.2;
+  const slot = laneSlot(bot);
+  const jitterX = ((slot % 3) - 1) * 1.6;
+  const jitterZ = (slot % 2 === 0 ? 1 : -1) * 1.2;
   const gx = route.x + jitterX;
   const gz = route.z + jitterZ;
   const cell = grid.nearestWalkable(gx, gz);
@@ -647,7 +666,6 @@ export function separateFromOthers(match, bot, boxes, separateRadius = 0.92) {
  */
 function updateCoverDecision(match, bot, grid, boxes, ctx) {
   const brain = bot.brain;
-  if (globalThis.__NOCOVER) { brain.coverSpot = null; return; }
   const prof = brain.profile;
   const threat = brain.targetVisible ? brain.target : null;
   const shotAt = bot.lastDamageAt > match.time - 1.2;
@@ -803,8 +821,7 @@ export function updateBot(match, bot, dt, ctx) {
   if (bot.lastDamageAt > match.time - 0.35 && ctx.coordinator && brain.rng() < prof.coordination) {
     callForHelp(ctx.coordinator, bot, match.time);
   }
-  if (globalThis.__NOSUPPORT) bot.brain.supportCall = null;
-  const distress = globalThis.__NOSUPPORT ? null : latestHelp(ctx.coordinator, bot.team, match.time, bot.id);
+  const distress = latestHelp(ctx.coordinator, bot.team, match.time, bot.id);
   brain.supportCall = distress;
   if (distress && match.time > brain.supportCooldown) {
     const allyDist = Math.hypot(distress.x - bot.x, distress.z - bot.z);

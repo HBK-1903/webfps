@@ -86,7 +86,7 @@ Kod imzalama sertifikası olmadığı için Windows ilk çalıştırmada SmartSc
 
 ### Testler ve kalite kapısı
 ```bash
-npm test             # 115 test, tamamı headless (Node + jsdom)
+npm test             # 117 test, tamamı headless (Node + jsdom)
 npm run lint         # ESLint (gerçek hata odaklı kural seti)
 npm run verify       # lint + test + build — tek komutta tam doğrulama
 npm run qa           # scripted playtest → docs/QA-REPORT.md
@@ -227,7 +227,7 @@ src/
     scene.js  actorRigs.js  viewmodel.js  fx.js
   ui/                   # HUD, ses, ayarlar (localStorage)
   main.js               # uygulama kabuğu: menü akışı, input, pointer lock, render döngüsü
-tests/                  # 115 test (core, AI, nişan, HUD, PWA, e2e app boot)
+tests/                  # 117 test (core, AI, nişan, HUD, PWA, e2e app boot)
 tools/serve.mjs         # dev sunucusu
 tools/sim.mjs           # headless maç simülatörü
 build.mjs               # tek dosya offline build
@@ -240,7 +240,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 
 ## 5. Test raporu
 
-`npm test` → **115/115 geçti** (Node 22 + jsdom, headless):
+`npm test` → **117/117 geçti** (Node 22 + jsdom, headless):
 
 | Dosya | Kapsam |
 |---|---|
@@ -250,7 +250,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 | `tests/nav.test.js` (11) | Yürünebilirlik, spawn simetrisi ve güvenliği, A* erişilebilirliği, tünelleme yok, LOS, ray-cast |
 | `tests/ai.test.js` (22) | Duvar arkasını görmeme, FOV konisi, zorluk farkı (ölçülmüş tepki/isabet), son bilinen konum, işitme gürültüsü, boş şarjörle ateş etmeme, harita dışına çıkmama, yığılmama, lane yürüyüşü (spawn'da kilitlenmeme), sessiz raundun çözülmesi (tıkanma bütçesi), tohumlu maç tekrarlanabilirliği (determinizm), takım arkadaşıyla ayrışma, siper noktalarının simetrisi + gerçekten saklaması, yaralı botun sipere gidip çömelmesi, siperin tek taraflı olması, yardım çağrısı ve **düşman konumu sızdırmaması** |
 | `tests/packaging.test.js` (7) | Electron config'i (appId, hedefler, dosya listesi) parse edilip doğrulanır; renderer güvenliği (`contextIsolation`/`sandbox`/`nodeIntegration`), in-game çıkış köprüsü, PWA manifest + maskable ikon, service worker sürümleme/temizlik ve `file://`'de sessizce devre dışı kalma |
-| `tests/aim.test.js` (12) | Nişangahın tam ekran merkezinde olması, ADS'in gerçekten kamera eksenine oturması, kafa/gövde hacimlerinin kesişmemesi, botların gövdeye nişan alıp zorlukla yükselmesi, geri tepmenin seri boyunca birikmesi, şerit dağılımının oyuncunun hangi slotta olduğundan bağımsız olması |
+| `tests/aim.test.js` (14) | Nişangahın tam ekran merkezinde olması, ADS'in gerçekten kamera eksenine oturması, kafa/gövde hacimlerinin kesişmemesi, botların gövdeye nişan alıp zorlukla yükselmesi, geri tepmenin seri boyunca birikmesi, çömelirken nişan noktasının sıçramaması, şeritlerin `ROUTES` geometrisine göre gerçekten dönmüş eşleşmesi ve slotun `actor.index` değil `spawnZ` olması |
 | `tests/integration.test.js` (11) | 3 zorlukta tam maç bitişi, geri sayımda hasar/ateş kilidi, ölüyken ateş, dost ateşi, kafa isabeti, duraklatma dondurması, restart temizliği, HUD durumu, hassasiyet etkisi |
 | `tests/ui.test.js` (5) | Gerçek HTML + gerçek HUD bağlaması, reload/boş şarjör, raund sonucu, ayar doğrulama/kalıcılık, tüm kontrol ID'leri |
 | `tests/integration.test.js` (14) | + canlı zorluk değişimi, paylaşılan nav grid, `gameSnapshot` sözleşmesi |
@@ -266,11 +266,22 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 - Bot isabet oranları: kolay ~%15, normal ~%22, zor ~%36 → zorluk **ölçülebilir** biçimde ayrışıyor,
   zor botlar bile atışlarının çoğunu kaçırıyor (LOS + nişan hatası gerçekten çalışıyor).
 
-**`npm run matrix`** (denge matrisi, **60 maç/hücre** → `docs/qa-matrix.json`):
-oyuncunun takımının kazanma oranı — kolayda otomatik oyuncuyla %43, normalde %40, zorda %30; hareketsiz
-(idle) oyuncuyla kolayda %25, normalde %10, zorda %15. Zorluk kademeleri monoton ve ölçülebilir.
-Ortalama raund süreleri kolay 43 s, normal 24–31 s, zor 17–23 s; **tıkanan raund oranı kolay %14,
-normal %6, zor %0–1** (hedef <%25).
+**`npm run matrix`** (denge matrisi, **40 maç/hücre**, iki bağımsız tohum bloğu → `docs/qa-matrix.json`):
+oyuncunun takımının kazanma oranı — otomatik oyuncuyla kolay **%38 / %53**, normal **%38 / %33**,
+zor **%33 / %45** (blok 1000 / blok 90000); hareketsiz (idle) oyuncuyla kolay %18 / %25,
+normal %18 / %23, zor %13 / %5.
+
+Kazanma oranı mutlak olarak gürültülüdür (±10 puan, tek blokta iki kademe yer değiştirebilir); zorluk
+ayrımı bu yüzden **K/D ve raund süresiyle** okunmalı, ikisi de iki blokta tutarlı biçimde sıralı:
+
+| zorluk | K/D (blok 1000 / 90000) | ort. raund süresi (blok 1000 / 90000) |
+|---|---|---|
+| kolay | 1.31 / 1.71 | 47.4 s / 46.6 s |
+| normal | 0.99 / 0.91 | 25.2 s / 25.2 s |
+| zor | 0.48 / 0.63 | 18.0 s / 18.3 s |
+
+`node tools/matrix.mjs --matches 40 --seed-base 90000` ile ikinci blok ayrıca koşulur. **Tıkanan raund
+oranı kolay %19–22, normal %5–8, zor %0–1** (hedef <%25).
 
 **Tarafsızlık (side bias) testi:** harita 180° dönel simetrik; 5v5 saf bot maçlarında (10 tohumlu maç,
 42 karara bağlanmış raund) ALFA 23 / BRAVO 19 raund kazandı (%54.8 / %45.2). Test tohumlu (seeded) olduğu için bu sayı
@@ -365,6 +376,34 @@ Bu maddeler aynı zamanda şartnamedeki "zorluk sadece tepki/nişan/karar/koordi
 görüş yok" kuralının korunduğunu gösterir: düzeltmelerin hiçbiri botlara ek bilgi vermedi, sadece
 kendi harita bilgilerini doğru kullanmalarını sağladı.
 
+### 7b-bis. Nişan/şerit turunda eklenenler
+
+7. **Şerit ataması iki takımda farklı şerit *şekilleri* üretiyordu.** `map.js`'teki ayna fonksiyonu,
+   180° dönüşte şeridin de döneceğini hesaba katmıyordu: A'nın `north` koridoru (z = −16) dönüşte B'nin
+   `south` koridoruna (z = +16) düşer, ama atama B'ye *aynı* şeridi veriyordu. Üstelik `bot.js` bu
+   fonksiyonu hiç çağırmıyor, kendi özel `LANE_PATTERN`/`laneForSlot` kopyasını `actor.index` ile
+   kullanıyordu. Sonuç: ALFA `north×2, south×1, mid×1` yürürken BRAVO `mid×2, south×2, north×1`
+   yürüyordu — iki takım aynı *sayıda* şerit kapladığı için hiçbir test bunu yakalamıyordu.
+   Şerit ataması artık `map.js`'te tek yerde, slot `spawnZ`'den türetiliyor, test `ROUTES`'un gerçek
+   geometrisine karşı dönmüş eşleşmeyi doğruluyor (mutasyonla sınandı: eski hâle dönünce test kırılıyor).
+8. **Şerit dağıtım testi totolojiydi.** Test, `laneForMirroredSlot('B', s)`'yi
+   `laneForMirroredSlot('A', mirrorSlot(s))` ile karşılaştırıyordu — ama B tarafı zaten *tanım gereği*
+   böyle hesaplandığı için bu eşitlik hiçbir zaman bozulamazdı. Aynı şekilde "iki takım aynı şerit
+   karışımına sahip olmalı" iddiası da yanlıştı: dönel simetride `north` sayısı `south` sayısına eşit
+   olmalı, birbirine değil. İkisi de düzeltildi.
+9. **Çömelirken nişan noktası tek karede sıçrıyordu.** `aimPoint` `target.crouch > 0.5` eşiğiyle iki sabit
+   yükseklik (1.12 m / 0.78 m) arasında atlıyordu. `crouch` ~100 ms'de 0→1 lerp ettiği için, hedef tam
+   eşiği geçtiği karede botun nişan noktası ~34 cm zıplıyor ve o karede ne kadar iyi takip ediyor olsa da
+   ıskalıyordu (ölçülen: tek adımda 12.2 cm). Yükseklikler artık `PLAYER.chestHeight` /
+   `PLAYER.crouchChestHeight` olarak config'de ve lerp ile geçiliyor.
+10. **`aimPoint` ve denge testindeki nişan yükseklikleri çift yazılmıştı.** Bot nişanı, vuruş hacimleri ve
+    `tools/matrix.mjs`'teki otomatik oyuncu aynı gövde yüksekliğini üç ayrı yerde sabit sayı olarak
+    taşıyordu; biri değişince diğerleri sessizce kayıyordu. Hepsi tek kaynaktan (`PLAYER`) okuyor.
+11. **Denge matrisi tek tohum bloğuna bağlıydı.** `tools/matrix.mjs` her koşuda aynı 1000 tabanlı tohumları
+    kullanıyordu, yani "zorluk kademeleri monoton" iddiası tek bir blokla sınanıyordu ve blok yeniden
+    üretilemiyordu. `--seed-base` eklendi; zorluk ayrımının kazanma oranı yerine K/D ve raund süresiyle
+    okunması gerektiği de bu sırada ölçüldü (kazanma oranı bloklar arası ±10 puan oynuyor).
+
 ---
 
 ## 7c. Siper ve takım desteği: ne denendi, ne işe yaradı
@@ -434,7 +473,7 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 115 headless test |
+| `npm test` | 117 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
 | `npm run verify` | lint + test + a11y + build |

@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url';
 import { PerspectiveCamera } from 'three';
 
 import { createActor, eyePoint, hitVolumes } from '../src/core/actor.js';
-import { laneForMirroredSlot, mirrorSlot, LANE_PATTERN } from '../src/core/map.js';
+import { laneForMirroredSlot, mirrorSlot, LANE_PATTERN, ROUTES, SPAWNS, ROTATE_LANE } from '../src/core/map.js';
 import { createGame } from '../src/core/game.js';
-import { aimPoint } from '../src/core/bot.js';
+import { aimPoint, laneSlot } from '../src/core/bot.js';
 import { DIFFICULTY } from '../src/core/config.js';
 import { castShot, directionFromAngles, anglesTo } from '../src/core/combat.js';
 import { createViewModel, applyPose, setViewModelWeapon } from '../src/render/viewmodel.js';
@@ -267,16 +267,49 @@ test('lane spread does not depend on which slot the human player takes', () => {
     assert.equal(mirrorSlot(m), slot, `slot ${slot} does not mirror back`);
     assert.ok(m >= 0 && m < LANE_PATTERN.length, `slot ${slot} mirrors out of range: ${m}`);
   }
-  // The physically mirrored slot must walk the same lane, or one squad spreads
-  // differently from the other.
+  // The physically mirrored slot must walk the *rotation* of that lane, not the
+  // lane itself. This assertion used to compare the two teams for equality,
+  // which was vacuous: laneForMirroredSlot('B', s) was *defined* as
+  // laneForMirroredSlot('A', mirrorSlot(s)), so equality held by construction
+  // and the check could never fail. The real requirement is that the map and the
+  // assignment agree, so it is checked against ROUTES below.
   for (let slot = 0; slot < LANE_PATTERN.length; slot++) {
     const a = laneForMirroredSlot('A', slot);
     const b = laneForMirroredSlot('B', mirrorSlot(slot));
-    assert.equal(b, a, `slot ${slot}: A walks ${a}, mirrored B slot walks ${b}`);
+    assert.equal(b, ROTATE_LANE[a], `slot ${slot}: A walks ${a}, mirrored B slot walks ${b}, expected the rotation ${ROTATE_LANE[a]}`);
   }
-  // And the squad as a whole must cover the same mix of lanes on both sides.
-  const mix = (team) => LANE_PATTERN.map((_, i) => laneForMirroredSlot(team, i)).sort().join(',');
-  assert.equal(mix('A'), mix('B'), 'the two squads spread across different lanes');
+  // And the squad as a whole must cover the same mix of lanes on both sides —
+  // as a rotation, because north and south swap under the 180-degree turn. The
+  // earlier version compared the raw multisets for equality, which only ever
+  // passed because of the (wrong) same-lane assumption above: it asserted
+  // "A north count == B north count" when the map demands "A north count ==
+  // B south count". Two squads covering mirrored halves must NOT have equal
+  // lane tallies.
+  const tally = (team) => {
+    const counts = { mid: 0, north: 0, south: 0 };
+    for (let i = 0; i < LANE_PATTERN.length; i++) counts[laneForMirroredSlot(team, i)] += 1;
+    return counts;
+  };
+  const a = tally('A');
+  const b = tally('B');
+  assert.equal(b.mid, a.mid, `mid is walked by ${a.mid} on ALFA but ${b.mid} on BRAVO`);
+  assert.equal(b.north, a.south, `BRAVO north (${b.north}) must match ALFA south (${a.south}) under rotation`);
+  assert.equal(b.south, a.north, `BRAVO south (${b.south}) must match ALFA north (${a.north}) under rotation`);
+
+  // The naming convention is only a guess; the map is the truth. A 180-degree
+  // rotation about the origin must carry each A corridor onto the corridor the
+  // paired B slot walks. (A's north run sits at z = -16, so it rotates onto B's
+  // south run at z = +16 — the two lanes cross over.)
+  const rotatePoint = (p) => ({ x: -p.x, z: -p.z });
+  const dist = (p, q) => Math.hypot(p.x - q.x, p.z - q.z);
+  for (const lane of Object.keys(ROUTES.A)) {
+    const rotated = ROUTES.A[lane].map(rotatePoint);
+    const target = ROTATE_LANE[lane];
+    const other = ROUTES.B[target];
+    assert.ok(other, `no BRAVO route named ${target}`);
+    const err = rotated.reduce((s, p) => s + Math.min(...other.map((q) => dist(p, q))), 0) / rotated.length;
+    assert.ok(err < 0.5, `A ${lane} does not rotate onto B ${target} (mean waypoint error ${err.toFixed(2)}m)`);
+  }
 });
 
 test('a bot derives its slot from its spawn position, not from its actor index', () => {
@@ -292,10 +325,10 @@ test('a bot derives its slot from its spawn position, not from its actor index',
   assert.ok(lanesA.size >= 2, `ALFA bots all share one lane: ${[...lanesA]}`);
   assert.ok(lanesB.size >= 3, `BRAVO bots all share one lane: ${[...lanesB]}`);
 
-  // The important part: the four bots must fill the four slots the player does
-  // NOT take, and the lanes must be exactly the ones that slot excludes. Using
-  // actor.index instead shifted ALFA by one slot and broke this.
-  const playerSlot = g.match.actors.find((a) => a.isPlayer).index;
+  // The four bots must fill the four slots the player does NOT take, and the
+  // lanes must be exactly the ones those slots map to. Using actor.index instead
+  // shifted ALFA by one slot and broke this.
+  const playerSlot = SPAWNS.A.findIndex((s) => Math.abs(s.z - g.player.spawnZ) < 1e-6);
   const expectedA = LANE_PATTERN
     .map((_, i) => i)
     .filter((i) => i !== playerSlot)
@@ -304,5 +337,78 @@ test('a bot derives its slot from its spawn position, not from its actor index',
     .join(',');
   const actualA = botsA.map((b) => b.brain.lane).sort().join(',');
   assert.equal(actualA, expectedA, `ALFA lanes ${actualA} != expected ${expectedA}`);
+
+  // Slot-by-slot agreement with the map. The previous version of this test only
+  // compared sorted lane *multisets*, so it passed while the two squads walked
+  // completely different shapes of spread: BRAVO was assigned its lanes from
+  // bot.js's own private copy of LANE_PATTERN, keyed on actor.index, and the
+  // sorted mixes happened to match. Check the pairing directly instead.
+  for (const team of ['A', 'B']) {
+    for (const bot of g.match.actors.filter((a) => a.team === team && a.brain)) {
+      const slot = SPAWNS[team].findIndex((s) => Math.abs(s.z - bot.spawnZ) < 1e-6);
+      assert.ok(slot >= 0, `${team} bot has no slot for spawnZ ${bot.spawnZ}`);
+      assert.equal(bot.brain.lane, laneForMirroredSlot(team, slot),
+        `${team} bot in slot ${slot} walks ${bot.brain.lane}, map says ${laneForMirroredSlot(team, slot)}`);
+    }
+  }
+  // Every spawn slot must be occupied by exactly one actor, or a lane goes
+  // unwalked and the squad shape is wrong even with the lanes themselves right.
+  for (const team of ['A', 'B']) {
+    const taken = g.match.actors.filter((a) => a.team === team)
+      .map((a) => SPAWNS[team].findIndex((s) => Math.abs(s.z - a.spawnZ) < 1e-6))
+      .sort((x, y) => x - y);
+    assert.deepEqual(taken, [0, 1, 2, 3, 4], `${team} does not fill every spawn slot: ${taken}`);
+  }
   void lanesA; void lanesB;
+});
+
+test('the aim point moves smoothly through a crouch instead of jumping', () => {
+  // `crouch` is a lerp from 0 to 1 (PLAYER.crouchLerpSpeed), not a boolean, and
+  // the aim point used to snap between two heights at crouch > 0.5. That snapped
+  // the target of a tracked shot by the whole chest-to-crouch-chest distance in a
+  // single frame, mid-crouch, where no amount of aim tracking could compensate.
+  const game = createGame({ difficulty: 'normal', seed: 5150 });
+  const bot = game.match.actors.find((a) => a.team === 'B');
+  const target = game.match.actors.find((a) => a.team === 'A' && a.isPlayer);
+  const samples = [];
+  for (let i = 0; i <= 20; i++) {
+    target.crouch = i / 20;
+    samples.push(aimPoint(bot, target).y);
+  }
+  // Monotone: standing up must never move the aim point down and vice versa.
+  for (let i = 1; i < samples.length; i++) {
+    assert.ok(samples[i] <= samples[i - 1] + 1e-9,
+      `aim height went up while crouching (${samples[i - 1].toFixed(3)} -> ${samples[i].toFixed(3)} at step ${i})`);
+  }
+  // Continuous: no single 5% step of the crouch blend may move it by more than a
+  // few millimetres. The old threshold produced a ~34cm cliff here.
+  const jump = Math.max(...samples.slice(1).map((y, i) => Math.abs(y - samples[i])));
+  assert.ok(jump < 0.05, `aim point jumps ${(jump * 100).toFixed(1)}cm in one crouch step`);
+  // And it must actually reach the configured crouched chest height.
+  const crouched = aimPoint(bot, { ...target, crouch: 1, crouchBlend: 1 });
+  assert.ok(Math.abs(crouched.y - DIFFICULTY.normal.headBias * eyePoint({ ...target, crouch: 1 }).y
+    - (1 - DIFFICULTY.normal.headBias) * 0.78) < 0.02,
+    `fully crouched aim height is ${crouched.y.toFixed(2)}, not the crouched chest band`);
+});
+
+test('lane slot comes from spawnZ even when it disagrees with the actor index', () => {
+  // Today the human always takes ALFA index 0, so a bot's index happens to equal
+  // its slot and index-based code looks correct by coincidence. This asserts the
+  // derivation directly, with the two deliberately out of step, so the
+  // coincidence cannot hide a regression. (Swapping the player to another slot
+  // would revive the old one-slot skew instantly.)
+  const actor = createActor({ team: 'A', name: 'test', index: 0 });
+  for (let slot = 0; slot < SPAWNS.A.length; slot++) {
+    const spawn = SPAWNS.A[slot];
+    actor.spawnZ = spawn.z;
+    assert.equal(laneSlot(actor), slot, `spawnZ ${spawn.z} should be slot ${slot}, not ${laneSlot(actor)}`);
+  }
+  // A BRAVO actor with the same spawnZ occupies a different row, so the same z
+  // must resolve against that team's own spawns.
+  const bravo = createActor({ team: 'B', name: 'test', index: 0 });
+  bravo.spawnZ = SPAWNS.B[4].z;
+  assert.equal(laneSlot(bravo), 4);
+  // Missing spawn data must degrade to slot 0, not throw or go NaN.
+  actor.spawnZ = undefined;
+  assert.equal(laneSlot(actor), 0);
 });

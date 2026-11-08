@@ -12,6 +12,12 @@ export const PLAYER = {
   height: 1.8,
   eyeHeight: 1.62,
   crouchEyeHeight: 1.05,
+  // Aim reference points on the body, in metres above the floor, measured while
+  // standing. They live here because the AI's aim point and the hit volumes are
+  // both derived from them: when these were separate literals, changing the
+  // hitbox silently moved where bots aimed.
+  chestHeight: 1.12,
+  crouchChestHeight: 0.78,
   walkSpeed: 4.9,
   sprintSpeed: 6.6,
   crouchSpeed: 2.5,

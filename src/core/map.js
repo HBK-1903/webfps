@@ -94,7 +94,6 @@ export function boxToAABB(b) {
 
 export const MAP_AABBS = MAP_BOXES.map(boxToAABB);
 
-/** Spawn positions are mirrored too, so neither side is favoured. */
 /**
  * How a team's spawn slots are walked.
  *
@@ -109,19 +108,28 @@ export const LANE_PATTERN = ['mid', 'north', 'south', 'mid', 'north'];
 export const ROTATE_LANE = { mid: 'mid', north: 'south', south: 'north' };
 
 /**
- * The lane a mirrored slot walks. A 180-degree rotation maps every point to its
- * opposite, so the mirrored slot must walk the mirrored *lane*: A slot 0 ("mid")
- * pairs with B slot 4, which must therefore also be "mid".
+ * The lane a mirrored slot walks, derived from the map geometry rather than
+ * from a naming convention.
+ *
+ * A 180-degree rotation about the origin maps A's slot 0 to B's slot 4, and it
+ * maps the *corridor*, not just the spawn point: A's `north` run
+ * (z = -16, x from -24 to 15) rotates onto B's `south` run (z = +16, x from 24
+ * down to -15). Verified waypoint-by-waypoint in tests/aim.test.js against
+ * ROUTES, so this cannot drift from the map again.
+ *
+ * Getting this wrong is silent: both squads still cover the same *count* of
+ * lanes, so a slot-multiset check passes while the two halves of the map are
+ * walked by different shapes of squad. The earlier version returned the same
+ * lane for B, which left north twice on one side and south twice on the other.
  */
 export function laneForMirroredSlot(team, slot) {
-  if (team === 'A') return LANE_PATTERN[slot % LANE_PATTERN.length];
-  return laneForMirroredSlot('A', mirrorSlot(slot));
-}
-
-/** Lane a team member in `slot` walks. Mirrored for team B. */
-export function laneForSlot(team, slot) {
   const base = LANE_PATTERN[slot % LANE_PATTERN.length];
-  return team === 'B' ? ROTATE_LANE[base] : base;
+  if (team !== 'B') return base;
+  // B's slot s is the physical mirror of A's slot mirrorSlot(s), so it walks the
+  // rotation of *that* slot's corridor — two steps, in this order: mirror the
+  // slot, then rotate the lane.
+  const peer = LANE_PATTERN[mirrorSlot(slot) % LANE_PATTERN.length];
+  return ROTATE_LANE[peer];
 }
 
 /** Slots 0-4 mirrored onto the 0-4 of the other side (0↔0, 1↔4, 2↔3). */
