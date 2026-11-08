@@ -599,3 +599,106 @@ kbd {
   border: 1px solid var(--panel-line);
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
 }
+
+/* ---------------------------------------------------------- tactical map
+   Bottom left, above the vitals. Kept small and deliberately low-contrast:
+   a map that pulls the eye away from the crosshair is a net loss in a game
+   where the crosshair is the thing you must watch. */
+.minimap-wrap {
+  position: absolute;
+  left: 18px;
+  bottom: 92px;
+  width: 180px;
+  padding: 6px 6px 4px;
+  background: rgba(8, 14, 18, 0.72);
+  border: 1px solid var(--panel-line);
+  border-radius: 3px;
+  backdrop-filter: blur(2px);
+}
+.minimap {
+  display: block;
+  width: 168px;
+  height: 116px;
+  /* The canvas is drawn at DPR in hud.js; CSS sets the layout size. */
+  image-rendering: auto;
+}
+.minimap-caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+}
+.minimap-lane { color: var(--accent); }
+
+/* ---------------------------------------------------------- compass
+   A strip of letters that slides past a fixed needle. Simpler and calmer than
+   a rotating dial, and it stays readable at the 8-10 px this has to fit in. */
+.compass-wrap {
+  position: absolute;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  height: 22px;
+  overflow: hidden;
+  /* Fade the ends so ticks enter and leave instead of popping. */
+  mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);
+}
+.compass-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  height: 100%;
+  will-change: transform;
+}
+.compass-tick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 74px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+}
+.compass-tick.major { color: #eafcfb; font-weight: 700; text-shadow: 0 0 8px rgba(79, 209, 197, 0.5); }
+/* The needle sits *behind* the letters and only marks the top and bottom
+   edges. A full-height line drawn over the strip ran straight through the
+   letter under the needle, which is precisely the letter you need to read. */
+.compass-needle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 4px;
+  background: var(--accent);
+  opacity: 0.9;
+  z-index: 0;
+}
+.compass-needle::after {
+  content: '';
+  position: absolute;
+  top: 18px;
+  left: 0;
+  width: 1px;
+  height: 4px;
+  background: var(--accent);
+  opacity: 0.9;
+}
+.compass-strip { z-index: 1; }
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

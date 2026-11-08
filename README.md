@@ -198,7 +198,9 @@ Hepsi `localStorage`'da saklanır ve yeniden açılışta korunur.
 
 **Arayüz / ses**
 - HUD: can, zırh, silah, şarjör/yedek, kendi takım listesi, canlı sayıları, skor, raund durumu,
-  geri sayım, nişangâh (yayılmaya göre açılan), hitmarker, reload halkası, killfeed, hasar yönü.
+  geri sayım, nişangâh (yayılmaya göre açılan), hitmarker, reload halkası, killfeed, hasar yönü,
+  **taktik harita** (şerit bantları, takım arkadaşları, süresi dolan düşman temasları, konum etiketi)
+  ve **pusula** (kayan şerit + iğne, ayrıca ekran okuyucu için metin).
 - Menü → zorluk → ayarlar → kontroller → duraklatma → maç sonu akışının tamamı.
 - Ses tamamen prosedürel (WebAudio): hiç ses dosyası yok, her ses kodla sentezleniyor. Katmanlı silah
   sesleri (crack + gövde + mekanizma + oda kuyruğu), mesafeye göre tiz kaybı, yürüyüş/koşma/eğilme için
@@ -542,10 +544,10 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 137 headless test |
+| `npm test` | 155 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
-| `npm run visual` | Gerçek Chromium'da oyunu açar: 19 adım + nişangah/girdi/pozlama ölçümü (§10b) |
+| `npm run visual` | Gerçek Chromium'da oyunu açar: 22 adım + nişangah/girdi/pozlama/harita ölçümü (§10b) |
 | `npm run visual:setup` | Görsel test tarayıcısını kurar (`.playwright/`, ~200 MB, tek seferlik) |
 | `npm run audio` | Her sesi çevrimdışı render edip ölçer: tepe/RMS/uzunluk/merkez frekans (§10c) |
 | `npm run audio:live` | Oyunu açar, gerçek bir tur oynar ve mikserin ne çaldığını raporlar (§10c) |
@@ -703,6 +705,59 @@ düşman şarjörü üretiliyor ve test bunları istiyor. Koddan çıkarınca te
 
 **Sınır:** kulağa nasıl geldiğini ölçemiyorum. Ölçtüğüm şey sesin var olduğu, seviyesinin doğru olduğu
 ve diğer seslerden ayırt edilebildiği. Beğenip beğenmeyeceğin hâlâ senin kulağına bağlı.
+
+
+### 10d. Taktik harita ve pusula
+
+Harita 64 × 44 m ve üç şeritli. Bu turdan önce nerede olduğunu bilmenin tek yolu düzeni ezberlemekti:
+üç şerit içinden bakınca birbirinin aynısı, HUD'da nişangâhtan başka hiçbir şey yok.
+
+**Ne gösteriyor**
+- Şerit bantları: kuzey sıcak, güney soğuk, orta pirinç — **zemindeki şeritlerle aynı renkler**
+  (`render/scene.js` LANE_STRIPS). Harita dünyayla çelişirse haritasızlıktan kötüdür.
+- Kendi konumun: yönü gösteren bir ok.
+- Takım arkadaşların: her zaman tam konum.
+- Düşman temasları: **soluklaşan** kırmızı halkalar. Taze temas parlak, 6 saniyelik olan hayalet.
+  Bu solma keyfi değil — "ne kadar güveneyim" sorusunun cevabı.
+- Konum etiketi: `ALFA · KUZEY–ORTA ARASI`. Şeritler arasındayken hangi ikisi arasında olduğunu
+  söylüyor; ilk sürüm "ŞERİT DIŞI" diyordu, doğruydu ama işe yaramazdı — üstelik iki spawn da
+  şeritler arasında olduğu için oyuncunun gördüğü ilk şey buydu.
+
+**Pusula** kayan bir şerit + sabit iğne. Dört ana yönde de merkezdeki harf doğru (test ediliyor).
+Yön, kameranın `yaw` değerinden geliyor: yaw 0 = kuzey (−z), pozitif yaw sağa.
+
+#### Neden bu bir duvar hack'i değil
+
+Minimap'in en kolay yanlış yapılışı `match.actors`'ı doğrudan çizmektir: o zaman harita her düşmanı,
+kimse görmeden gösterir. Burada temaslar ayrı bir kaynaktan geliyor ve yalnızca üç yolla oluşuyor:
+
+1. **Sen vurdun** — nereye vurduğunu bilirsin.
+2. **Sana ateş edildi** — nereden geldiğini bilirsin (vursa da vurmasa da).
+3. **Takım arkadaşın gördü** — `canSee()` yani görüş konisi + görüş hattı + görüş mesafesi.
+
+Yani oyuncu, botların sahip olduğundan fazla bilgi almıyor. Bu test ediliyor: 45 saniyelik gerçek bir
+maçta her tick'te her temasın gerçek bir aktör olduğu, **düşman** olduğu ve **canlı** olduğu doğrulanıyor.
+
+Bu arada gerçek bir hata çıktı: aynı tick'te hem temas işaretlenip hem düşman ölebiliyordu, o zaman ceset
+6 saniye haritada kalıyordu — nişan alabileceğin bir hedef gibi görünüyordu. Her tick sonunda
+ölü temaslar süpürülüyor.
+
+#### Ölçüm
+
+`npm run visual` içinde iki kontrol (22 adım):
+- **Minimap çiziyor** — canvas'ın boş olmadığı piksel sayımıyla doğrulanıyor (mutasyon: `drawMinimap`
+  çağrısını silmek → %0 dolu → adım kırılıyor).
+- **Pusula dört yönde doğru** — iğnenin altındaki harf K/D/G/B ile karşılaştırılıyor
+  (mutasyon: yönü ters çevirmek → 2 yön yanlış → adım kırılıyor).
+
+**Bu turda bulunan iki test hatası:**
+1. Pusula kontrolü sabit `320 ms` bekliyordu; 2 FPS'te HUD bir sonraki karede güncellendiği için
+   **kararsızdı** — tek başına geçiyor, tam koşuda ara sıra düşüyordu. Koşula bağlı beklemeye çevrildi.
+2. Mutasyon çöktüğünde test tümden iptal oluyordu (15 sn timeout). Artık başlık gelmezse bu *başarısız
+   bir adım* olarak raporlanıyor — bozuk pusula "pusula yanlış" demeli, "test çöktü" değil.
+
+**Dürüst sınır:** haritanın *okunabilir* olduğunu ölçtüm (boş değil, yönü doğru). *Güzel* olduğunu ya da
+168 px'te yeterince rahat okunduğunu değil — o senin ekranına bakıyor.
 
 ## 11. Lisans / varlıklar
 

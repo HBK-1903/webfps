@@ -445,7 +445,110 @@ async function main() {
     if (app?.game?.pc) app.game.pc.pitch = 0;
   });
 
-  // ── 11. console ───────────────────────────────────────────────────────────
+  // ── 11. tactical map ──────────────────────────────────────────────────────
+  // Two things can go wrong with a minimap and neither is a crash: it can draw
+  // nothing at all, or it can point the wrong way. Both are checked here.
+  const map = await page.evaluate(() => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    const canvas = document.getElementById('minimap');
+    if (!canvas || !app?.game) return { error: 'minimap yok' };
+    const ctx = canvas.getContext('2d');
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    // Count distinct non-background pixels: a blank canvas returns a single
+    // colour and the map would be "present" but useless.
+    let nonEmpty = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] > 8 && (data[i] + data[i + 1] + data[i + 2]) > 90) nonEmpty += 1;
+    }
+    return {
+      w: canvas.width,
+      h: canvas.height,
+      fill: +(nonEmpty / (canvas.width * canvas.height)).toFixed(3),
+      lane: document.getElementById('minimap-lane')?.textContent || '',
+    };
+  });
+  measurements.map = map;
+  if (map.error) {
+    step('Minimap', false, map.error);
+  } else {
+    step('Minimap çiziyor', map.fill > 0.02, `piksel dolu ${(map.fill * 100).toFixed(1)}%`);
+    step('Konum etiketi dolu', map.lane.length > 3, map.lane);
+  }
+
+  // Compass: the letter under the needle must match the heading at all four
+  // cardinals. This is the check that would catch an inverted or offset strip —
+  // the kind of bug that is invisible until you are lost.
+  const compass = [];
+  for (const [, yaw] of [['K', 0], ['D', Math.PI / 2], ['G', Math.PI], ['B', -Math.PI / 2]]) {
+    await page.evaluate((y) => {
+      const app = globalThis.__SIFIR_NOKTA__;
+      if (app?.game?.pc) app.game.pc.yaw = y;
+    }, yaw);
+    // Wait for the HUD to catch up, don't sleep a fixed amount. This sandbox
+    // renders at ~2 FPS, so a 320 ms sleep can land before the frame that
+    // applies the new heading — which made this check flaky: it passed in
+    // isolation and failed intermittently inside the full run. Polling on the
+    // actual condition is the only honest wait here.
+    const expectedDeg = Math.round((((yaw * 180) / Math.PI) + 360) % 360);
+    let settled = true;
+    try {
+      await page.waitForFunction(
+        (want) => {
+          const text = document.getElementById('compass-text')?.textContent || '';
+          const m = text.match(/(-?\d+)°/);
+          if (!m) return false;
+          const deg = ((Number(m[1]) % 360) + 360) % 360;
+          return Math.abs(deg - want) < 3;
+        },
+        expectedDeg,
+        { timeout: 12000 },
+      );
+    } catch {
+      // The heading never arrived. Record it as a failed step rather than
+      // letting the throw abort the whole run: a broken compass should read as
+      // "the compass is wrong", not as "the test crashed", and the remaining
+      // checks (console, summary) still deserve to run.
+      settled = false;
+    }
+    if (!settled) {
+      const actual = await page.evaluate(() => document.getElementById('compass-text')?.textContent || '');
+      compass.push({ shown: `(açı gelmedi: ${actual})`, offset: -1 });
+      continue;
+    }
+    compass.push(await page.evaluate(() => {
+      const wrap = document.querySelector('.compass-wrap');
+      const strip = document.getElementById('compass-strip');
+      if (!wrap || !strip) return { error: 'pusula yok' };
+      const box = wrap.getBoundingClientRect();
+      const centre = box.left + box.width / 2;
+      let best = null;
+      let bestDelta = Infinity;
+      for (const tick of strip.children) {
+        const r = tick.getBoundingClientRect();
+        const delta = Math.abs(r.left + r.width / 2 - centre);
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          best = tick.textContent;
+        }
+      }
+      return { shown: best, offset: +bestDelta.toFixed(1) };
+    }));
+  }
+  measurements.compass = compass;
+  const expected = ['K', 'D', 'G', 'B'];
+  const shown = compass.map((c) => c.shown);
+  const compassOk = shown.every((v, i) => v === expected[i]);
+  step(
+    'Pusula dört yönde doğru',
+    compassOk,
+    compassOk ? shown.join(' / ') : `beklenen ${expected.join(' / ')}, görünen ${shown.join(' / ')}`,
+  );
+  await page.evaluate(() => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    if (app?.game?.pc) app.game.pc.yaw = 0;
+  });
+
+  // ── 12. console ───────────────────────────────────────────────────────────
   step('Konsol hatası yok', errors.length === 0, errors.length ? errors.slice(0, 2).join(' | ') : 'temiz');
 
   await browser.close();

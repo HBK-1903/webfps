@@ -106,6 +106,50 @@
           </div>
         </div>
 
+        <!-- Tactical map. Drawn on a canvas because there are ~40 boxes plus up
+             to a dozen markers: as DOM nodes it would be slower and would need
+             a node per box. The canvas is sized in CSS pixels and scaled by the
+             device pixel ratio in hud.js, so it stays sharp on a retina screen.
+
+             Everything inside is aria-hidden: a live enemy-position feed read
+             aloud would be noise, and the same information is available in the
+             compass text (which *is* announced). -->
+        <div class="minimap-wrap" aria-hidden="true">
+          <canvas id="minimap" class="minimap" width="180" height="124"></canvas>
+          <div class="minimap-caption">
+            <span id="minimap-lane" class="minimap-lane">—</span>
+          </div>
+        </div>
+
+        <!-- Compass strip. The tick marks move with the camera, so the letters
+             passing the centre show the heading without a separate number. -->
+        <div class="compass-wrap" aria-hidden="true">
+          <div class="compass-strip" id="compass-strip">
+            <!-- Two copies of the eight points: the strip scrolls, so a single
+                 copy would run out of letters at the wrap-around. -->
+            <span class="compass-tick" data-bearing="0">K</span>
+            <span class="compass-tick" data-bearing="45">KD</span>
+            <span class="compass-tick" data-bearing="90">D</span>
+            <span class="compass-tick" data-bearing="135">GD</span>
+            <span class="compass-tick" data-bearing="180">G</span>
+            <span class="compass-tick" data-bearing="225">GB</span>
+            <span class="compass-tick" data-bearing="270">B</span>
+            <span class="compass-tick" data-bearing="315">KB</span>
+            <span class="compass-tick" data-bearing="0">K</span>
+            <span class="compass-tick" data-bearing="45">KD</span>
+            <span class="compass-tick" data-bearing="90">D</span>
+            <span class="compass-tick" data-bearing="135">GD</span>
+            <span class="compass-tick" data-bearing="180">G</span>
+            <span class="compass-tick" data-bearing="225">GB</span>
+            <span class="compass-tick" data-bearing="270">B</span>
+            <span class="compass-tick" data-bearing="315">KB</span>
+          </div>
+          <div class="compass-needle"></div>
+        </div>
+        <!-- The heading is also exposed as text for screen readers, since the
+             strip above is a purely visual transform. -->
+        <div id="compass-text" class="visually-hidden" role="status" aria-live="polite"></div>
+
         <div id="damage-vignette" class="damage-vignette" aria-hidden="true"></div>
         <div id="damage-dir" class="damage-dir" aria-hidden="true"></div>
         <div id="death-overlay" class="death-overlay hidden">

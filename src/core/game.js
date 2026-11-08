@@ -10,7 +10,7 @@ import { createPlayerController, updatePlayer, playerTryFire, playerReload, play
 import { createBrain, createCoordinator, assignLanes, updateBot, BOT_STATE, refreshHuntZones } from './bot.js';
 import { activeWeapon, ammoInfo, releaseTrigger } from './weapon.js';
 import { eyePoint } from './actor.js';
-import { notifyHit, hearSound } from './bot.js';
+import { notifyHit, hearSound, canSee } from './bot.js';
 
 /**
  * Shortest distance from point `p` to the segment a-b, in the xz plane.
@@ -79,6 +79,11 @@ export function createGame({ difficulty = 'normal', seed = 12345, grid = null } 
     stats: { shots: 0, hits: 0, headshots: 0, damageDealt: 0 },
     onSound: null,
     deathHandled: false,
+    // What the player's side currently knows about enemy positions. Deliberately
+    // *not* a mirror of `match.actors`: the minimap reads this, and if it read
+    // the actors directly it would reveal every enemy on the map regardless of
+    // whether anyone could see or hear them, which is a wallhack.
+    contacts: [],
   };
 
   startMatch(match, { difficulty });
@@ -115,6 +120,52 @@ function pushKillfeed(fx, entry) {
   fx.killfeed.unshift(entry);
   if (fx.killfeed.length > 5) fx.killfeed.length = 5;
   entry.age = 0;
+}
+
+/**
+ * Record that the player's side knows an enemy is at (x, z).
+ *
+ * Kept as a short rolling list rather than a map keyed by actor id, because the
+ * same enemy reported twice within a second should refresh one marker, not
+ * produce two. The TTL that decides when a contact stops being drawn lives in
+ * tacticalmap.js (CONTACT_TTL) so the policy sits in one place.
+ */
+function reportContact(game, actor) {
+  const list = game.contacts;
+  if (!actor.alive) {
+    // A dead enemy is not a contact. Clearing the entry the moment they die is
+    // what stops a corpse from sitting on the minimap for the rest of the TTL,
+    // which would look like a standing target you could shoot.
+    const dead = list.findIndex((c) => c.actorId === actor.id);
+    if (dead >= 0) list.splice(dead, 1);
+    return;
+  }
+  const existing = list.find((c) => c.actorId === actor.id);
+  if (existing) {
+    existing.x = actor.x;
+    existing.z = actor.z;
+    existing.time = game.match.time;
+    return;
+  }
+  list.push({ id: actor.id, actorId: actor.id, x: actor.x, z: actor.z, time: game.match.time });
+  if (list.length > 12) list.shift();
+}
+
+/**
+ * Drop contacts whose actor has died since they were reported.
+ *
+ * Per-call cleanup inside `reportContact` is not enough: the team-awareness
+ * pass can mark an enemy one line before that same enemy is killed later in the
+ * same tick, and nothing would ever revisit the entry. The symptom is a corpse
+ * sitting on the minimap for six seconds, which reads as a standing target you
+ * can shoot. This runs once per tick, after all damage for the tick is in.
+ */
+function pruneContacts(game) {
+  const list = game.contacts;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const actor = game.match.actors.find((a) => a.id === list[i].actorId);
+    if (!actor || !actor.alive) list.splice(i, 1);
+  }
 }
 
 export function addLookInput(game, dxPixels, dyPixels, sensitivity) {
@@ -224,6 +275,11 @@ export function updateGame(game, dtRaw) {
           if (s.result.cast.headshot) game.stats.headshots += 1;
           const reg = registerDamage(match, game.player, s.result.cast.actor, s.result.hit);
           notifyHit(s.result.cast.actor, game.player.id, match.time);
+          // Your own shot is the most reliable contact there is: you just hit
+          // them, so you know exactly where they were. It still expires like
+          // any other contact — knowing where someone *was* is not the same as
+          // knowing where they are.
+          reportContact(game, s.result.cast.actor);
           fx.hitmarker = 0.22;
           fx.hitmarkerKill = reg.died;
           if (s.result.hit) game.stats.damageDealt += s.result.hit.raw;
@@ -247,6 +303,20 @@ export function updateGame(game, dtRaw) {
     for (const bot of match.actors) if (bot.brain && bot.alive) bots.push(bot);
     const flip = match.actors.length > 0 && Math.floor(match.time * 60) % 2 === 0;
     if (flip) bots.reverse();
+    // --- team awareness ---------------------------------------------------
+    // A teammate who can see an enemy reports it, exactly like a bot calling a
+    // contact over comms. This is what makes the minimap a *team* picture
+    // rather than a solo one, and it is bounded: only bots on the player's own
+    // side, only enemies they can actually see through `canSee` (FOV + line of
+    // sight + view distance), and only while they are alive.
+    for (const mate of match.actors) {
+      if (!mate.brain || !mate.alive || mate.team !== game.player.team) continue;
+      for (const foe of match.actors) {
+        if (!foe.alive || foe.team === mate.team) continue;
+        if (canSee(mate, foe, MAP_AABBS)) reportContact(game, foe);
+      }
+    }
+
     for (const bot of bots) {
       // Bots reload where you cannot see them, so the magazine clack is the
       // only cue that they are vulnerable. Emit it on the transition.
@@ -281,6 +351,10 @@ export function updateGame(game, dtRaw) {
           if (result.cast.type === 'actor' && result.cast.actor.isPlayer) {
             const reg = registerDamage(match, shooter, result.cast.actor, result.hit);
             notifyHit(result.cast.actor, shooter.id, match.time);
+            // Being shot from somewhere tells you exactly where that somewhere
+            // is, hit or miss. This is what makes the damage-direction arrow
+            // and the minimap agree instead of contradicting each other.
+            reportContact(game, shooter);
             if (result.hit) {
               fx.damageFlash = Math.min(1, fx.damageFlash + (result.hit.headshot ? 0.9 : 0.55));
               const eye = eyePoint(game.player);
@@ -317,6 +391,7 @@ export function updateGame(game, dtRaw) {
 
   // --- feedback / bookkeeping -----------------------------------------
   decayFx(fx, dt);
+  pruneContacts(game);
   const events = drainEvents(match);
   for (const e of events) {
     if (e.type === 'death') {
@@ -326,6 +401,10 @@ export function updateGame(game, dtRaw) {
     } else if (e.type === 'round_start') {
       clearTransientFx(fx);
       fx.killfeed.length = 0;
+      // Contacts belong to a round. Carrying them over would put markers on an
+      // empty map at the start of the next round, which is both wrong and
+      // confusing.
+      game.contacts.length = 0;
       fx.roundBanner = { text: `RAUND ${e.round}`, until: 1.6 };
       game.coordinator.contacts = {};
       game.coordinator.hot.length = 0;
@@ -439,10 +518,19 @@ export function hudState(game) {
     playerTeam: p.team,
     teamMates: game.match.actors
       .filter((a) => a.team === p.team)
-      .map((a) => ({ id: a.id, name: a.name, alive: a.alive, isPlayer: a.isPlayer, health: Math.round(a.health) })),
+      // Positions are included because the minimap draws teammates, and a
+      // teammate you cannot place on the map is not much help. Enemy positions
+      // are deliberately absent — they arrive through `contacts` instead.
+      .map((a) => ({ id: a.id, name: a.name, alive: a.alive, isPlayer: a.isPlayer, health: Math.round(a.health), x: a.x, z: a.z })),
     enemiesAlive: aliveCount(game.match, p.team === 'A' ? 'B' : 'A'),
     difficulty: game.match.difficulty,
     paused: game.paused,
+    // Tactical-map inputs. `contacts` is the player's side's knowledge of enemy
+    // positions, not the enemies themselves; see reportContact().
+    contacts: game.contacts.map((c) => ({ id: c.id, x: c.x, z: c.z, time: c.time })),
+    now: game.match.time,
+    playerPos: { x: p.x, z: p.z },
+    yaw: game.pc.yaw,
   };
 }
 
