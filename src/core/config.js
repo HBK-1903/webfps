@@ -18,6 +18,11 @@ export const PLAYER = {
   // hitbox silently moved where bots aimed.
   chestHeight: 1.12,
   crouchChestHeight: 0.78,
+  // How fast the sight settles onto the camera axis. The viewmodel uses the same
+  // rate, so the accuracy bonus and the visible sight arrive together (~200 ms
+  // to 95%). Raising one without the other re-introduces the mismatch where the
+  // cone was fully aimed while the sight was still off-axis.
+  adsLerpSpeed: 14,
   walkSpeed: 4.9,
   sprintSpeed: 6.6,
   crouchSpeed: 2.5,

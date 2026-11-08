@@ -12,6 +12,11 @@ export function createPlayerController(actor) {
     yaw: actor.yaw,
     pitch: 0,
     ads: false,
+    // 0 = hip, 1 = fully aimed. The sight takes ~200ms to settle, and the
+    // accuracy bonus must follow the *same* curve: the player used to get the
+    // full ADS spread reduction on the frame the button went down, while the
+    // sight was still visibly off-axis for a fifth of a second.
+    adsBlend: 0,
     localX: 0,
     localZ: 0,
     sprint: false,
@@ -62,6 +67,13 @@ export function updatePlayer(pc, input, ctx) {
   const crouchTarget = wantCrouch ? 1 : 0;
   a.crouch += (crouchTarget - a.crouch) * Math.min(1, PLAYER.crouchLerpSpeed * dt);
   if (Math.abs(a.crouch - crouchTarget) < 0.01) a.crouch = crouchTarget;
+
+  // The ADS blend runs on the same rate the viewmodel uses for its sight
+  // (1 - (1 - 14*dt) per frame in viewmodel.js), so what the player sees and
+  // what the spread cone does are the same curve.
+  const adsTarget = pc.ads ? 1 : 0;
+  pc.adsBlend += (adsTarget - pc.adsBlend) * Math.min(1, PLAYER.adsLerpSpeed * dt);
+  if (Math.abs(pc.adsBlend - adsTarget) < 0.01) pc.adsBlend = adsTarget;
 
   const moving = Math.abs(input.forward) > 0.01 || Math.abs(input.right) > 0.01;
   const sprinting = Boolean(input.sprint) && input.forward > 0.1 && !pc.ads && a.crouch < 0.5;
@@ -128,7 +140,7 @@ export function playerTryFire(pc, { actors, boxes, rng = Math.random }) {
     aimPitch: pc.pitch,
     aimYaw: pc.yaw,
     moving: a.speedFactor > 0.15,
-    ads: pc.ads,
+    adsBlend: pc.adsBlend,
     triggerHeld: w.triggerHeld,
     rng,
   });

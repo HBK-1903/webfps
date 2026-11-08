@@ -732,7 +732,9 @@ function renderGame(dt) {
   setViewModelWeapon(app.viewmodel, game.player.loadout.current);
   applyPose(app.viewmodel, {
     speedFactor: game.player.speedFactor,
-    adsBlend: game.pc.ads ? 1 : 0,
+    // The core's blend, not a 0/1 flag: the sight and the spread cone must
+    // animate on the same curve or the reticle lies during the transition.
+    adsBlend: game.pc.adsBlend,
     dt,
     sprinting: game.pc.sprint,
   });

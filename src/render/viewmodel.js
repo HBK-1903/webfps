@@ -2,6 +2,7 @@
 // bob, recoil kick and ADS blending. Purely cosmetic.
 
 import * as THREE from 'three';
+import { PLAYER } from '../core/config.js';
 
 const MAT = () => new THREE.MeshLambertMaterial({ color: 0x232c31 });
 const MAT_ACCENT = () => new THREE.MeshLambertMaterial({ color: 0x3f5157 });
@@ -145,7 +146,11 @@ export function setReloadVisual(state, progress) {
 
 /** @param {object} actor player actor @param {object} p pose info */
 export function applyPose(state, { speedFactor, adsBlend, dt, sprinting }) {
-  state.adsBlend += (adsBlend - state.adsBlend) * Math.min(1, 14 * dt);
+  // Since the core now hands us its own 0..1 blend, this is a smoothing pass
+  // over an already-smoothed value (it converges slightly slower than the core,
+  // which keeps the sight from ever leading the cone). The literal 14 used to be
+  // an independent rate that had nothing to do with the shooting code.
+  state.adsBlend += (adsBlend - state.adsBlend) * Math.min(1, PLAYER.adsLerpSpeed * dt);
   const w = state.current === 'rifle' ? state.rifle : state.pistol;
   const hip = HIP.clone();
   const ads = adsPosition(state.current);

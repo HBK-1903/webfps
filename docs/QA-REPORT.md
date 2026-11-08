@@ -1,6 +1,6 @@
 # QA RAPORU — SIFIR NOKTA
 
-Üretim: `node tools/qa.mjs` · 2026-11-08 16:30 UTC
+Üretim: `node tools/qa.mjs` · 2026-11-08 16:34 UTC
 
 | Geçti | Uyarı | Hata |
 |---|---|---|

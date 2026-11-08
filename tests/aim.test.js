@@ -14,6 +14,7 @@ import { createActor, eyePoint, hitVolumes } from '../src/core/actor.js';
 import { laneForMirroredSlot, mirrorSlot, LANE_PATTERN, ROUTES, SPAWNS, ROTATE_LANE } from '../src/core/map.js';
 import { createGame } from '../src/core/game.js';
 import { aimPoint, laneSlot } from '../src/core/bot.js';
+import { updatePlayer } from '../src/core/player.js';
 import { DIFFICULTY } from '../src/core/config.js';
 import { castShot, directionFromAngles, anglesTo } from '../src/core/combat.js';
 import { createViewModel, applyPose, setViewModelWeapon } from '../src/render/viewmodel.js';
@@ -360,6 +361,49 @@ test('a bot derives its slot from its spawn position, not from its actor index',
     assert.deepEqual(taken, [0, 1, 2, 3, 4], `${team} does not fill every spawn slot: ${taken}`);
   }
   void lanesA; void lanesB;
+});
+
+test('the ADS accuracy bonus follows the sight instead of snapping on', () => {
+  // The sight takes ~200ms to settle onto the camera axis (viewmodel lerp). The
+  // spread cone used to drop to its aimed value on the very first frame, so for
+  // a fifth of a second the player was rewarded for an aim they could not see
+  // through — the same class of "reticle lies" bug as an off-centre crosshair.
+  const game = createGame({ difficulty: 'normal', seed: 8080 });
+  const pc = game.pc;
+
+  // 1. The blend must ramp, not jump, and it must not go backwards.
+  pc.ads = true;
+  const blends = [];
+  for (let i = 0; i < 60; i++) {
+    updatePlayer(pc, game.input, { dt: 1 / 60, boxes: [], actors: [] });
+    blends.push(pc.adsBlend);
+  }
+  assert.ok(blends[0] < 0.3, `first frame is already ${(blends[0] * 100).toFixed(0)}% aimed`);
+  assert.ok(blends[blends.length - 1] > 0.99, 'ADS never reaches full aim');
+  for (let i = 1; i < blends.length; i++) {
+    assert.ok(blends[i] >= blends[i - 1] - 1e-9, 'the ADS blend goes backwards while holding the button');
+  }
+
+  // 2. The cone must interpolate between hip and aimed, not step between them.
+  //    A fresh loadout per sample, with spread pinned to base, so the only thing
+  //    that varies is the blend.
+  const coneFor = (blend) => {
+    const w = activeWeapon(createLoadout());
+    w.spread = w.def.spread.base; // a settled gun: the cone is the base value
+    w.triggerHeld = false;
+    // rng() === 1 makes the yaw offset exactly +half, so spreadDeg is the cone.
+    const shot = tryShoot(w, { adsBlend: blend, rng: () => 1, triggerHeld: false });
+    return shot ? shot.spreadDeg : 0;
+  };
+  const hip = coneFor(0);
+  const half = coneFor(0.5);
+  const aimed = coneFor(1);
+  assert.ok(hip > half && half > aimed, `cone does not interpolate: hip ${hip}, half ${half}, aimed ${aimed}`);
+  assert.ok(Math.abs(half - (hip + aimed) / 2) < 1e-9, `half-aimed is not halfway: hip ${hip}, half ${half}, aimed ${aimed}`);
+
+  // 3. And it has to arrive with the sight: the blend the viewmodel receives is
+  //    the same number the shooting code receives, from the same controller.
+  assert.ok(blends.some((b) => b > 0.4 && b < 0.6), 'the transition never passes through half-aimed');
 });
 
 test('the aim point moves smoothly through a crouch instead of jumping', () => {
