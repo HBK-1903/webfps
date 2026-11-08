@@ -4,8 +4,14 @@
 import * as THREE from 'three';
 import { PLAYER } from '../core/config.js';
 
-const MAT = () => new THREE.MeshLambertMaterial({ color: 0x232c31 });
-const MAT_ACCENT = () => new THREE.MeshLambertMaterial({ color: 0x3f5157 });
+// Viewmodel albedos. The gun was 0x232c31 — 35/255 at best — and because the
+// model is parented to the camera it sits outside the room's light pools, so in
+// practice it rendered as a solid black silhouette holding up a black rifle.
+// A weapon you cannot see is a weapon you cannot read the state of, so the body
+// is now a lit gunmetal and the accent is lighter still: the two are what tell
+// pistol from rifle at a glance.
+const MAT = () => new THREE.MeshLambertMaterial({ color: 0x39424a });
+const MAT_ACCENT = () => new THREE.MeshLambertMaterial({ color: 0x55636d });
 
 function buildPistol() {
   const g = new THREE.Group();
@@ -95,6 +101,23 @@ export function createViewModel(camera) {
   const flashLight = new THREE.PointLight(0xffcf8a, 0, 6, 2);
   flashLight.position.set(0.1, -0.05, -0.7);
   camera.add(flashLight);
+
+  // A dedicated viewmodel key light, parented to the camera so it travels with
+  // the gun and never depends on where the player is standing. Without it the
+  // weapon is lit only by whatever happens to spill onto it, which is usually
+  // nothing — it is centimetres from the near plane and below every wall lamp.
+  // Short range (4 m) so it cannot leak into the room and change the scene.
+  // Intensity is in candela and the gun is ~0.3 m away, so illuminance scales
+  // as 1/d^2 and a small number goes a long way: 5.5 blew the receiver out to
+  // near-white chrome. These are tuned against a measured frame, not by eye.
+  const gunKey = new THREE.PointLight(0xf2f6ff, 0.55, 4, 2);
+  gunKey.position.set(0.28, 0.18, 0.22);
+  camera.add(gunKey);
+  // A dim warm fill from the opposite side stops the far face of the receiver
+  // from going fully black, which is what made the shape unreadable.
+  const gunFill = new THREE.PointLight(0xffd8b0, 0.14, 4, 2);
+  gunFill.position.set(-0.35, -0.12, 0.1);
+  camera.add(gunFill);
 
   const state = {
     root,

@@ -322,7 +322,130 @@ async function main() {
   step('F3 katmanı canlı', dbg1.length > 0 && dbg1 !== dbg2, dbg1 ? `${dbg1.split('\n').length} satır` : 'boş');
   if (dbg1) writeFileSync(path.join(OUT, 'debug-overlay.txt'), `${dbg1}\n\n--- 1.4s sonra ---\n\n${dbg2}`, 'utf8');
 
-  // ── 9. console ────────────────────────────────────────────────────────────
+  // ── 9. exposure ───────────────────────────────────────────────────────────
+  // The scene used to render almost black: measured, the median luminance of a
+  // live frame was 21/255 and the brightest pixel in the whole viewport was
+  // 47/255. Three separate causes (albedo, three.js physical light units, a
+  // missing sky) each contributed, and none of them was visible as an error —
+  // the game simply looked broken. These thresholds are deliberately loose
+  // bands, not a target: they catch "unlit" and "blown out", not "a bit darker
+  // than I would like". Reading the framebuffer directly rather than the
+  // screenshot means no PNG decoding and no colour-management surprises.
+  // Measure at a *defined* orientation. Without this the number depends on
+  // where the previous step left the camera — the pitch-clamp step parks it at
+  // +88 degrees, i.e. staring at the sky, which made the same scene read 28/255
+  // instead of 53/255. A brightness check that changes answer with the camera
+  // is not a check.
+  await page.evaluate(() => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    if (app?.game?.pc) {
+      app.game.pc.pitch = 0;
+      app.game.pc.yaw = 0;
+    }
+  });
+  await page.waitForTimeout(600);
+
+  const frame = await page.evaluate(() => {
+    const sc = globalThis.__SIFIR_NOKTA__?.scene;
+    if (!sc || !sc.renderer) return { error: 'sahne yok' };
+    const gl = sc.renderer.getContext();
+    // Render exactly once and read exactly once, straight after.
+    //
+    // The context is created without preserveDrawingBuffer, so the drawing
+    // buffer is cleared after the compositor takes its copy. A readPixels that
+    // does not follow a render of our own returns all zeros — which is exactly
+    // what happened here first: the screenshot looked correct while the
+    // measurement reported a median of 6/255. Any second render before the
+    // read would be fine; two reads around one render is not.
+    sc.renderer.render(sc.scene, sc.camera);
+    const w = gl.drawingBufferWidth;
+    const h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const lum = (i) => 0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2];
+    const all = [];
+    for (let i = 0; i < w * h; i++) all.push(lum(i));
+    all.sort((a, b) => a - b);
+    const q = (x) => Math.round(all[Math.min(all.length - 1, Math.floor(all.length * x))]);
+    // The gameplay frame, excluding the HUD bands, so UI text cannot carry the
+    // measurement on its own.
+    const centre = [];
+    for (let y = Math.floor(h * 0.3); y < Math.floor(h * 0.7); y += 2) {
+      for (let x = Math.floor(w * 0.25); x < Math.floor(w * 0.75); x += 2) centre.push(lum(y * w + x));
+    }
+    centre.sort((a, b) => a - b);
+    return {
+      p10: q(0.1),
+      p50: q(0.5),
+      p90: q(0.9),
+      p99: q(0.99),
+      max: q(0.9999),
+      blackFraction: +(all.filter((v) => v < 8).length / all.length).toFixed(4),
+      centreMedian: Math.round(centre[Math.floor(centre.length / 2)]),
+    };
+  });
+  measurements.exposure = frame;
+  if (frame.error) {
+    step('Sahne pozlaması', false, frame.error);
+  } else {
+    // Reference for the bands below: before the fix p50 was 21 and max was 47.
+    step('Sahne yeterince aydınlık', frame.p50 >= 38, `p50 ${frame.p50}/255 (önce 21)`);
+    step('Sahne patlamıyor', frame.max <= 250 && frame.p90 <= 150, `max ${frame.max}, p90 ${frame.p90}`);
+    step('Siyah alan yok', frame.blackFraction < 0.02, `%${(frame.blackFraction * 100).toFixed(1)} saf siyah`);
+    step('Ortada görünür bir sahne var', frame.centreMedian >= 30, `merkez medyanı ${frame.centreMedian}`);
+    // Not: these are brightness bands, not a claim about art direction. Whether
+    // the scene *looks* good is a judgement this tool cannot make.
+  }
+
+  // ── 10. sky ───────────────────────────────────────────────────────────────
+  // Separate from the exposure check because it fails differently. The map has
+  // no ceiling, so a large part of every upward view is sky, and the sky is a
+  // hand-written ShaderMaterial — the one material three.js does *not* apply
+  // tone mapping or the sRGB conversion to. When that was missing the sky
+  // rendered at 7/255 while everything else looked correct, which no
+  // overall-brightness check can see at a level camera angle.
+  await page.evaluate(() => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    if (app?.game?.pc) app.game.pc.pitch = 0.72; // ~41 degrees up
+  });
+  await page.waitForTimeout(600);
+  const sky = await page.evaluate(() => {
+    const sc = globalThis.__SIFIR_NOKTA__?.scene;
+    if (!sc || !sc.renderer) return { error: 'sahne yok' };
+    const gl = sc.renderer.getContext();
+    sc.renderer.render(sc.scene, sc.camera);
+    const w = gl.drawingBufferWidth;
+    const h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    // Upper middle band: looking up, this is dome, not geometry.
+    const band = [];
+    for (let y = 0; y < Math.floor(h * 0.25); y += 2) {
+      for (let x = Math.floor(w * 0.3); x < Math.floor(w * 0.7); x += 2) {
+        const i = y * w + x;
+        band.push(0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2]);
+      }
+    }
+    band.sort((a, b) => a - b);
+    return { median: Math.round(band[Math.floor(band.length / 2)]), max: Math.round(band[band.length - 1]) };
+  });
+  measurements.sky = sky;
+  if (sky.error) {
+    step('Gökyüzü', false, sky.error);
+  } else {
+    // Measured: 52/255 with the colour-space fix, 25/255 without it. The band
+    // is 52 because it is not pure sky — walls and the tower poke into the top
+    // quarter of the frame. The threshold sits between the two, well clear of
+    // both, so the check is about the fix and not about the exact camera angle.
+    step('Gökyüzü aydınlık (renk uzayı doğru)', sky.median >= 35, `medyan ${sky.median}/255 (düzeltmesiz 25)`);
+    step('Gökyüzü gradyanlı, düz siyah değil', sky.max - sky.median >= 4, `medyan ${sky.median}, max ${sky.max}`);
+  }
+  await page.evaluate(() => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    if (app?.game?.pc) app.game.pc.pitch = 0;
+  });
+
+  // ── 11. console ───────────────────────────────────────────────────────────
   step('Konsol hatası yok', errors.length === 0, errors.length ? errors.slice(0, 2).join(' | ') : 'temiz');
 
   await browser.close();

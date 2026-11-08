@@ -339,6 +339,9 @@ Oynanış sizin tarafınızda önizlemede/`dist` dosyasında doğrulanmalı.
 - Destekleme *yakın* bir reflekstir (14 m içi); bot haritanın öbür ucundaki arkadaşına koşmaz. Bu bilinçli
   bir karar: denendiğinde oyuncunun takımını zayıflatıyordu (bkz. §7c).
 - Görsel kalite "yüksek" ayarında gölge açılır; entegre GPU'larda FPS düşebilir (kalite ayarı düşürülebilir).
+- Şerit renk kodlaması (kuzey sıcak / güney soğuk / orta pirinç) bir *yön* yardımcısıdır, haritayı
+  öğrenmenin yerine geçmez. Renk körlüğü olan oyuncular için tek ayırt edici işaret bu değildir:
+  şeritlerin konumu (kuzey/orta/güney) ve genişliği de sabittir.
 - Ses sentetik olduğu için gerçek silah kayıtları kadar zengin değil. Katmanlı sentez ve reverb bunu
   büyük ölçüde kapattı ama kayıt (sample) kalitesine ulaşmıyor. Ölçülebilir kısmı §10c'de.
 - Pointer lock tarayıcı tarafından Esc ile bırakılırsa oyun otomatik duraklar (tarayıcı davranışı).
@@ -431,6 +434,47 @@ kendi harita bilgilerini doğru kullanmalarını sağladı.
 
 ---
 
+### 7b-ter. Sahne neden siyahtı (ölçülerek bulundu)
+
+Ekran görüntülerinde sahne neredeyse siyahtı. Üç ayrı sebep vardı ve **hiçbiri hata olarak
+görünmüyordu** — oyun çalışıyordu, sadece göremiyordun.
+
+1. **Yüzey albedosu çok düşüktü.** Duvarlar `0x35474f`, zemin `0x1b262c` idi. Bu renkler tam
+   aydınlatmada bile lineer ~0.08 döndürüyor; ton eşlemeden sonra bu 21/255 demek.
+2. **three.js artık fiziksel ışık birimleri kullanıyor.** r155'ten beri Lambert BRDF'i ışığı π'ye
+   bölüyor ve şiddetler kandela benzeri birimde. Eski `1.15 / 1.5 / 0.35` değerleri bu yüzden
+   eskisinin yaklaşık **üçte biri** kadar ışık veriyordu. Sahne under-exposed'dı; ton eşlemesi
+   hiçbir şeyi öldürmüyordu. Ölçüm: şiddetleri 3 katına çıkarmak medyanı 25 → 66/255 yaptı ve
+   hiçbir piksel kırpmadı.
+3. **Gökyüzü yoktu ve gökyüzü kubbe shader'ı renk uzayını atlıyordu.** Haritanın tavanı yok
+   (duvarlar 3.5 m), yani her karenin üst kısmı boş arka plan rengiydi. Kubbe ekledikten sonra bile
+   üst yarı 7/255'te kaldı: elle yazılmış `ShaderMaterial`'a three.js ton eşleme ve sRGB dönüşümünü
+   **otomatik enjekte etmiyor**. Lineer 0.05, sRGB framebuffer'a doğrudan yazılınca 0.24 yerine 0.05
+   olarak görünüyor — beş kat karanlık. `#include <tonemapping_fragment>` + `#include <colorspace_fragment>`
+   eklemek bunu çözdü.
+
+Ayrıca elde tutulan silah `0x232c31` idi ve kameraya bağlı olduğu için oda ışıklarından pay almıyordu:
+tam siyah bir silüet. Kameraya bağlı iki kısa menzilli dolgu ışığı eklendi (şiddetler candela
+olduğu için 0.55 ve 0.14 — 5.5 denendi ve silah krom gibi patladı).
+
+**Önce / sonra (canlı kare, 1280×720):**
+
+| Ölçüm | Önce | Sonra |
+|---|---|---|
+| Medyan parlaklık (p50) | 21/255 | **53/255** |
+| En parlak piksel | 47/255 | 142/255 |
+| Saf siyah piksel oranı | %7.4 | **%0.0** |
+| Gökyüzü bandı medyanı | 7/255 | 52/255 |
+| Gökyüzüne bakarken p50 | 7/255 | 28/255 |
+
+Bunların hepsi `npm run visual` içinde **eşik olarak** duruyor (19 adım). Eşikler mutasyonla
+sınandı: ışıkları eski değere döndürmek 2 adımı, gökyüzü renk uzayı düzeltmesini silmek 1 adımı
+kırıyor.
+
+**Dürüst sınır:** bu ölçümler "sahne görünür" diyor, "sahne güzel" demiyor. Işık şiddetlerini
+beğenip beğenmeyeceğin hâlâ senin ekranına bakıyor. Grafik kalitesi "yüksek" ayarında gölgeler
+açıldığı için bu değerler orada biraz farklı olacak.
+
 ## 7c. Siper ve takım desteği: ne denendi, ne işe yaradı
 
 Bu iki davranış eklenirken üç kez geri alınan yaklaşım oldu; ölçümler olmadan fark edilmeyecek bir
@@ -501,7 +545,7 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | `npm test` | 137 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
-| `npm run visual` | Gerçek Chromium'da oyunu açar: 13 adım + nişangah/girdi ölçümü (§10b) |
+| `npm run visual` | Gerçek Chromium'da oyunu açar: 19 adım + nişangah/girdi/pozlama ölçümü (§10b) |
 | `npm run visual:setup` | Görsel test tarayıcısını kurar (`.playwright/`, ~200 MB, tek seferlik) |
 | `npm run audio` | Her sesi çevrimdışı render edip ölçer: tepe/RMS/uzunluk/merkez frekans (§10c) |
 | `npm run audio:live` | Oyunu açar, gerçek bir tur oynar ve mikserin ne çaldığını raporlar (§10c) |
