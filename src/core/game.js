@@ -12,6 +12,22 @@ import { activeWeapon, ammoInfo, releaseTrigger } from './weapon.js';
 import { eyePoint } from './actor.js';
 import { notifyHit, hearSound } from './bot.js';
 
+/**
+ * Shortest distance from point `p` to the segment a-b, in the xz plane.
+ * Used to decide whether an enemy bullet passed close enough to whizz.
+ */
+function distancePointToSegment(p, a, b) {
+  const abx = b.x - a.x;
+  const abz = b.z - a.z;
+  const len2 = abx * abx + abz * abz;
+  if (len2 < 1e-9) return Math.hypot(p.x - a.x, p.z - a.z);
+  let t = ((p.x - a.x) * abx + (p.z - a.z) * abz) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const cx = a.x + abx * t;
+  const cz = a.z + abz * t;
+  return Math.hypot(p.x - cx, p.z - cz);
+}
+
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return function rand() {
@@ -82,6 +98,8 @@ export function createFxState() {
     killfeed: [],
     roundBanner: null,
     sounds: [],
+    // Countdown until the "magazine drops" sound fires (see the reload block).
+    reloadMagOut: 0,
   };
 }
 
@@ -180,7 +198,19 @@ export function updateGame(game, dtRaw) {
       }
       const wasReloading = game.wasReloading || false;
       const nowReloading = w2.reloading;
-      if (wasReloading && !nowReloading && w2.mag > 0) pushSound(fx, { type: 'reload_done' });
+      if (!wasReloading && nowReloading) {
+        // The magazine drops almost immediately; the new one seats at the end.
+        pushSound(fx, { type: 'reload_start' });
+        fx.reloadMagOut = 0.28;
+      }
+      if (fx.reloadMagOut > 0) {
+        fx.reloadMagOut -= dt;
+        if (fx.reloadMagOut <= 0) pushSound(fx, { type: 'reload_mag_out' });
+      }
+      if (wasReloading && !nowReloading && w2.mag > 0) {
+        pushSound(fx, { type: 'reload_mag_in' });
+        pushSound(fx, { type: 'reload_done' });
+      }
       game.wasReloading = nowReloading;
     }
 
@@ -218,12 +248,35 @@ export function updateGame(game, dtRaw) {
     const flip = match.actors.length > 0 && Math.floor(match.time * 60) % 2 === 0;
     if (flip) bots.reverse();
     for (const bot of bots) {
+      // Bots reload where you cannot see them, so the magazine clack is the
+      // only cue that they are vulnerable. Emit it on the transition.
+      const bw = activeWeapon(bot.loadout);
+      const botWasReloading = bot.wasReloading || false;
+      const botReloadingNow = !!(bw && bw.reloading);
+      if (!botWasReloading && botReloadingNow) {
+        pushSound(fx, { type: 'enemy_reload', x: bot.x, z: bot.z });
+      }
+      bot.wasReloading = botReloadingNow;
       updateBot(match, bot, dt, {
         grid: game.grid,
         boxes: MAP_AABBS,
         coordinator: game.coordinator,
         onShot: ({ shooter, shot, result, origin }) => {
           addTracer(fx, origin, result.cast.point, result.cast.type);
+          // Near miss: a bullet that passes close but does not hit should be
+          // audible as a whizz. Without it, incoming fire you survive is
+          // completely silent, which reads as the bots shooting blanks.
+          const hitMe = result.cast.type === 'actor' && result.cast.actor.isPlayer;
+          const miss = result.cast.point && origin
+            ? distancePointToSegment(
+                { x: game.player.x, z: game.player.z },
+                { x: origin.x, z: origin.z },
+                { x: result.cast.point.x, z: result.cast.point.z },
+              )
+            : Infinity;
+          if (!hitMe && miss < 2.2 && game.player.alive) {
+            pushSound(fx, { type: 'whizz', x: origin.x, z: origin.z });
+          }
           if (result.cast.type === 'wall') addImpact(fx, result.cast.point, result.cast.box);
           if (result.cast.type === 'actor' && result.cast.actor.isPlayer) {
             const reg = registerDamage(match, shooter, result.cast.actor, result.hit);
@@ -241,7 +294,7 @@ export function updateGame(game, dtRaw) {
               // no UI needed for bot-vs-bot deaths, killfeed handled by events
             }
           }
-          pushSound(fx, { type: 'shot', weapon: shot.weaponId, x: shooter.x, z: shooter.z });
+          pushSound(fx, { type: 'shot', weapon: shot.weaponId, x: shooter.x, z: shooter.z, bot: true });
           alertBotsToSound(game, origin);
         },
         onSound: null,

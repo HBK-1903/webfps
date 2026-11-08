@@ -35,7 +35,7 @@ export default [
     // Tools that run code inside a browser page. `page.evaluate()` bodies are
     // serialised and executed in Chromium, so they may use DOM globals even
     // though the file itself is Node.
-    files: ['tools/visual.mjs'],
+    files: ['tools/visual.mjs', 'tools/audio-check.mjs', 'tools/audio-live.mjs'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
@@ -43,6 +43,7 @@ export default [
         window: 'readonly', document: 'readonly', console: 'readonly',
         requestAnimationFrame: 'readonly', MouseEvent: 'readonly',
         createImageBitmap: 'readonly', OffscreenCanvas: 'readonly',
+        OfflineAudioContext: 'readonly', AudioContext: 'readonly', KeyboardEvent: 'readonly',
         performance: 'readonly', globalThis: 'readonly',
       },
     },

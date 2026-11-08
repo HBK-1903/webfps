@@ -31,7 +31,7 @@ import {
 import { createFx, syncFx } from './render/fx.js';
 import { applyCameraAngles } from './render/math.js';
 import { createHud } from './ui/hud.js';
-import { createAudio } from './ui/audio.js';
+import { createAudio, soundPlacement } from './ui/audio.js';
 import { loadSettings, saveSettings, sanitize } from './ui/settings.js';
 import GUI from 'lil-gui';
 import { WEAPONS as TUNING_WEAPONS, DIFFICULTY as TUNING_DIFFICULTY, PLAYER as TUNING_PLAYER, COMBAT as TUNING_COMBAT } from './core/config.js';
@@ -431,7 +431,7 @@ function bindInput(canvas) {
     if (e.repeat) return;
     switch (e.code) {
       case 'KeyR':
-        if (playerReloadNow(app.game)) app.audio.play('reload_start');
+        playerReloadNow(app.game); // the sound comes back through drainSounds
         break;
       case 'Digit1':
         if (playerSwitchTo(app.game, 'pistol')) app.audio.play('switch');
@@ -615,11 +615,17 @@ function afterGameUpdate(dt) {
   for (const s of drainSounds(game)) {
     switch (s.type) {
       case 'shot': {
-        const fromElswhere = s.x !== undefined;
-        if (fromElswhere) {
-          const d = Math.hypot(game.player.x - s.x, game.player.z - s.z);
-          if (d > 6) app.audio.play('tail', { distance: d });
-          else app.audio.play(s.weapon === 'pistol' ? 'shot_pistol' : 'shot_rifle', { distance: d });
+        // Enemy fire: place it in the stereo field. Distance alone (what this
+        // did before) made every off-screen shooter sound like it came from the
+        // same direction, so you could not tell a flank from a corridor ahead.
+        if (s.x !== undefined) {
+          const place = soundPlacement(game.player, { x: s.x, z: s.z }, game.pc.yaw);
+          const d = place.distance;
+          if (d > 6) {
+            app.audio.play('tail', { distance: d, pan: place.pan });
+          } else {
+            app.audio.play(s.weapon === 'pistol' ? 'shot_pistol' : 'shot_rifle', { distance: d, pan: place.pan });
+          }
         }
         break;
       }
@@ -631,6 +637,15 @@ function afterGameUpdate(dt) {
         break;
       case 'empty':
         app.audio.play('empty');
+        break;
+      case 'reload_start':
+        app.audio.play('reload_start');
+        break;
+      case 'reload_mag_out':
+        app.audio.play('reload_mag_out');
+        break;
+      case 'reload_mag_in':
+        app.audio.play('reload_mag_in');
         break;
       case 'reload_done':
         app.audio.play('reload_end');
@@ -669,12 +684,21 @@ function afterGameUpdate(dt) {
     }
   }
 
-  // Footsteps while the player is actually moving on the ground.
-  if (game.player.alive && snap.phase === 'live' && game.player.speedFactor > 0.35) {
-    app.stepAccum += dt * (0.6 + game.player.speedFactor);
+  // Footsteps while the player is actually moving on the ground. Three
+  // flavours: crouch-walking is nearly silent, sprinting is loud and metallic.
+  // The threshold used to be a single `speedFactor > 0.35`, which made
+  // crouching inaudible *and* identical to walking — so the gait carried no
+  // information at all.
+  if (game.player.alive && snap.phase === 'live' && game.player.speedFactor > 0.12) {
+    const sprinting = game.pc.sprint;
+    const crouching = game.player.crouch > 0.5;
+    // Stride rate follows speed; a crouch walk is slower as well as quieter.
+    app.stepAccum += dt * (0.6 + game.player.speedFactor) * (crouching ? 0.6 : 1);
     if (app.stepAccum > 0.42) {
       app.stepAccum = 0;
-      app.audio.play('step');
+      if (crouching) app.audio.play('step_crouch');
+      else if (sprinting) app.audio.play('step_sprint');
+      else app.audio.play('step_walk');
     }
   }
 

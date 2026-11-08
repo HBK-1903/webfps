@@ -200,8 +200,10 @@ Hepsi `localStorage`'da saklanır ve yeniden açılışta korunur.
 - HUD: can, zırh, silah, şarjör/yedek, kendi takım listesi, canlı sayıları, skor, raund durumu,
   geri sayım, nişangâh (yayılmaya göre açılan), hitmarker, reload halkası, killfeed, hasar yönü.
 - Menü → zorluk → ayarlar → kontroller → duraklatma → maç sonu akışının tamamı.
-- Ses tamamen prosedürel (WebAudio): silah sesleri, mesafeye göre kısılma, isabet, reload, raund/maç stinger'ları.
-  Hiç ses dosyası yok.
+- Ses tamamen prosedürel (WebAudio): hiç ses dosyası yok, her ses kodla sentezleniyor. Katmanlı silah
+  sesleri (crack + gövde + mekanizma + oda kuyruğu), mesafeye göre tiz kaybı, yürüyüş/koşma/eğilme için
+  ayrı adım sesleri, üç aşamalı şarjör değişimi, düşman ateşinde stereo yön, ıskalayan kurşunun ıslığı.
+  Ayrıntı ve ölçümler: §10c.
 
 ---
 
@@ -337,7 +339,8 @@ Oynanış sizin tarafınızda önizlemede/`dist` dosyasında doğrulanmalı.
 - Destekleme *yakın* bir reflekstir (14 m içi); bot haritanın öbür ucundaki arkadaşına koşmaz. Bu bilinçli
   bir karar: denendiğinde oyuncunun takımını zayıflatıyordu (bkz. §7c).
 - Görsel kalite "yüksek" ayarında gölge açılır; entegre GPU'larda FPS düşebilir (kalite ayarı düşürülebilir).
-- Ses sentetik olduğu için gerçek silah kayıtları kadar zengin değil.
+- Ses sentetik olduğu için gerçek silah kayıtları kadar zengin değil. Katmanlı sentez ve reverb bunu
+  büyük ölçüde kapattı ama kayıt (sample) kalitesine ulaşmıyor. Ölçülebilir kısmı §10c'de.
 - Pointer lock tarayıcı tarafından Esc ile bırakılırsa oyun otomatik duraklar (tarayıcı davranışı).
 - **Erişilebilirlik kısmi:** menüler/diyaloglar axe-core WCAG 2.1 A/AA taramasından 0 ihlalle geçiyor
   (landmark, dialog rolü, canlı bölgeler). Ancak bir FPS'in oynanışı fare+klavye gerektirir; ekran
@@ -495,11 +498,13 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 121 headless test |
+| `npm test` | 137 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
 | `npm run visual` | Gerçek Chromium'da oyunu açar: 13 adım + nişangah/girdi ölçümü (§10b) |
 | `npm run visual:setup` | Görsel test tarayıcısını kurar (`.playwright/`, ~200 MB, tek seferlik) |
+| `npm run audio` | Her sesi çevrimdışı render edip ölçer: tepe/RMS/uzunluk/merkez frekans (§10c) |
+| `npm run audio:live` | Oyunu açar, gerçek bir tur oynar ve mikserin ne çaldığını raporlar (§10c) |
 | `npm run verify` | lint + test + a11y + build |
 | `npm run build` | Tek dosya offline build (`dist/SifirNokta.html`) |
 | `npm run build:site` | Kurulabilir site (PWA) → `dist/site/` (manifest, sw, ikonlar, `_headers`) |
@@ -565,6 +570,95 @@ dürüst olmaz.
 oyun kendini duraklatıyor. Test, oyunun kendi durumu üzerinden duraklamayı kaldırıyor ve **sabit
 timeout yerine turun `live` fazına geçmesini bekliyor** — çünkü 2 FPS'te oyun saati duvar saatinden ~7
 kat yavaş ilerliyor. Sabit beklemeyle yazılmış bir test burada sahte hata verirdi.
+
+
+### 10c. Ses: nasıl yapıldı, nasıl ölçüldü
+
+Ses dosyası yok, indirilen örnek yok. Her ses `src/ui/audio.js` içinde **sıfırdan sentezleniyor**:
+osilatörler, filtrelenmiş gürültü ve elle üretilmiş bir oda impulse'ı (konvolüsyon reverb).
+
+**Neden katmanlı.** İlk sürümde her silah "bir gürültü patlaması + bir bip" idi; bu yüzden bütün silahlar
+aynı silahın farklı ses seviyesi gibi duyuluyordu. Şimdi her atış en az dört katman:
+
+| Katman | Ne | Süre |
+|---|---|---|
+| crack | süpersonik çıtırtı, geniş bant | ~20 ms |
+| body | göğüste hissedilen gövde, alçak bant | ~60 ms |
+| action | silahın mekanik çevrimi, **inharmonik** metalik kısmi tonlar | ~10 ms |
+| tail | oda cevabı (reverb) | 200–600 ms |
+
+Mekanik seslerdeki kısmiler bilinçli olarak harmonik değil (1, 2.32, 3.71, 5.13 …). Tam sayı katları
+kullanılsaydı bir akor duyulurdu — gerçek çelik plaka/kutu öyle tınlamıyor.
+
+**Mesafe.** Sadece ses seviyesi düşmüyor: havada tiz önce kaybolduğu için mesafeye bağlı bir low-pass
+de var (`16000 / (1 + d/5.5)` Hz). 40 m'deki bir atış bu yüzden "kısık çıtırtı" değil, "uzaktan gümbürtü"
+olarak duyuluyor. Buna ek olarak yakın/uzak oranına göre dry/wet dengesi değişiyor.
+
+**Yön.** `soundPlacement(dinleyici, kaynak, yaw)` saf geometri: `pan = sin(rel)`, `rel = atan2(dx, -dz) - yaw`.
+`StereoPannerNode` ile uygulanıyor. Bu fonksiyonun işareti yanlış olsa her düşman yanlış tarafta
+duyulurdu; bu yüzden ayrı test ediliyor (`tests/audio.test.js`, 11 vaka + pan işareti süpürmesi).
+
+**Yeni sesler bu turda:** üç ayrı adım sesi (yürü/koş/eğil), üç aşamalı şarjör değişimi
+(`reload_start` → `reload_mag_out` → `reload_mag_in` → `reload_end`), düşman şarjör sesi (duvardan,
+filtrelenmiş, yönlü), ve ıskalayan kurşunun ıslığı (aşağı süpüren dar bant = Doppler).
+
+#### Nasıl ölçülüyor
+
+Ses "kulağa hoş geliyor" ile doğrulanamaz, ama üç şey ölçülebilir: **var mı, taşıyor mu, ayırt edilebiliyor mu.**
+
+`npm run audio` her sesi gerçek Chromium'da `OfflineAudioContext` ile 5 kez render edip ortalamasını alır:
+
+```
+ses                 peak      rms      uzunluk   merkez    sonra     flatness
+shot_rifle         -13.5dB  -33.4dB   0.378s    7007Hz   1628Hz   0.623
+shot_pistol        -16.5dB  -39.1dB   0.172s   10229Hz   3716Hz   0.770
+tail               -21.8dB  -36.8dB   0.461s     530Hz    389Hz   0.012
+step_walk          -39.5dB  -52.8dB   0.152s    1048Hz   1121Hz   0.075
+step_sprint        -32.0dB  -51.2dB   0.452s    1492Hz   1619Hz   0.075
+step_crouch        -50.2dB  -63.4dB   0.074s    4008Hz   3312Hz   0.332
+whizz              -27.2dB  -47.0dB   0.320s    8202Hz   3564Hz   0.581
+...
+82/82 kontrol geçti
+```
+
+Kontroller karşılaştırmalı, çünkü asıl hata "ses yok" değil "sesler birbirine benziyor":
+
+- Hiçbir ses sessiz değil (> -55 dBFS) ve hiçbiri kırpmıyor (< -1 dBFS).
+- Koşma adımı yürüyüşten **en az 3 dB** yüksek; eğilme adımı yürüyüşün **6–20 dB** altında
+  (fazlası sessiz = bozuk, azı = gizlilik yok).
+- Atış, adımdan **en az 2 kat** daha tiz (merkez frekans).
+- Tüfek ve pistol birbirinden ayrı ölçülüyor (yüksek/alçak dengesi bilinçli farklı).
+- Şarjör girme/çıkma sesleri farklı.
+- **Iskalayan kurşun aşağı süpürüyor**: sesin sonundaki merkez frekans başlangıcın %60'ının altında.
+  Bu kontrolü yazarken ölçüm penceresi sesin *kuyruğuna* denk geliyordu ve düzleştirilmiş bir süpürme
+  bile "geçiyordu" — pencere sabit 60 ms ofsete taşındı, sonra mutasyonla doğrulandı.
+
+Bu eşiklerin hepsi mutasyonla sınandı: yürüyüşü koşmaya eşitlemek, süpürmeyi düzleştirmek ve crouch'u
+normal adım yapmak testleri **kırıyor** (1/82, 1/82, 1/82). Yani testler gerçekten koruyor.
+
+#### Canlı doğrulama
+
+`npm run audio:live` oyunu açar, `OYNA → NORMAL → MAÇI BAŞLAT` ile gerçek bir tur başlatır, yürür/koşar/
+eğilir/ateş eder/şarjör değiştirir ve **mikserin gerçekten ne çaldığını** kaydeder. Son koşu:
+
+```
+✓ walk footsteps fire — 14 adet
+✓ sprint footsteps fire — 4 adet
+✓ crouch footsteps fire — 1 adet
+✓ the old generic step is gone
+✓ a reload emits its separate stages — reload_start, reload_mag_out, reload_mag_in, reload_end
+✓ enemy fire carries a stereo position — 41 adet
+✓ some of it is not dead centre — 41/41 yanda
+✓ enemy fire carries a distance — ortalama 41.0 m
+12/12 kontrol geçti
+```
+
+`enemy_reload` ve `whizz` bu turda denk gelmedi (2 FPS'te 90 oyun-saniyesi kısa); onlar için tarayıcıya
+güvenmek yerine **kafasız simülasyondan deterministik test** var: 180 oyun-saniyesinde 82 whizz ve 7
+düşman şarjörü üretiliyor ve test bunları istiyor. Koddan çıkarınca test kırılıyor.
+
+**Sınır:** kulağa nasıl geldiğini ölçemiyorum. Ölçtüğüm şey sesin var olduğu, seviyesinin doğru olduğu
+ve diğer seslerden ayırt edilebildiği. Beğenip beğenmeyeceğin hâlâ senin kulağına bağlı.
 
 ## 11. Lisans / varlıklar
 

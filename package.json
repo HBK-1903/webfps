@@ -22,7 +22,9 @@
     "icons": "node tools/make-icons.mjs",
     "app": "electron app/main.cjs",
     "app:dist": "npm run build && npm run icons && electron-builder --win",
-    "app:dist:portable": "npm run build && npm run icons && electron-builder --win portable"
+    "app:dist:portable": "npm run build && npm run icons && electron-builder --win portable",
+    "audio": "node tools/audio-check.mjs",
+    "audio:live": "node tools/audio-live.mjs"
   },
   "dependencies": {
     "three": "0.169.0"
