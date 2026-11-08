@@ -75,6 +75,36 @@ test('the desktop shell keeps the renderer locked down', () => {
   assert.ok(!preload.includes('exposeInMainWorld(\'nodeFs'), 'no filesystem access for the renderer');
 });
 
+test('the dev server serves the PWA files from the site root', () => {
+  // A manifest and a service worker are only found at their declared URL, and a
+  // worker's scope is its own directory — so both have to sit at the site root.
+  // The files live in src/pwa/, and the dev server used to serve only the repo
+  // root, so /manifest.webmanifest and /sw.js both 404'd under `npm run dev`.
+  // Installing the app therefore worked in the built site and failed in dev,
+  // which is exactly the difference that hides a bug until release.
+  const script = read('tools/serve.mjs');
+  assert.match(script, /VIRTUAL/, 'the dev server must map the PWA files onto the site root');
+  assert.match(script, /'\/manifest\.webmanifest'\s*:\s*'src\/pwa\/manifest\.webmanifest'/);
+  assert.match(script, /'\/sw\.js'\s*:\s*'src\/pwa\/sw\.js'/);
+  // The worker must be allowed to control the whole site, not just its folder.
+  assert.match(script, /service-worker-allowed/, 'the worker scope must cover the game page');
+  // And the mapping must not apply in --site mode, where the files are real.
+  assert.match(script, /SITE_MODE \? null : VIRTUAL/);
+});
+
+test('service worker registration is resolved against the document, not the module', () => {
+  // `new URL('./sw.js', import.meta.url)` resolves to this module's directory.
+  // In dev that is /src/ui/, so the browser requested /src/ui/sw.js: a 404, and
+  // even if served it would be scoped to /src/ui/ and never control the game.
+  // The built site only worked because esbuild puts everything next to sw.js.
+  const pwa = read('src/ui/pwa.js');
+  assert.ok(
+    !/register\(\s*new URL\(\s*['"][./]*sw\.js['"]\s*,\s*import\.meta\.url/.test(pwa),
+    'registration must not resolve sw.js relative to the module',
+  );
+  assert.match(pwa, /document\.baseURI/, 'the worker URL must be resolved against the document');
+});
+
 test('the in-game quit button closes the desktop window', () => {
   const main = read('src/main.js');
   assert.match(main, /SIFIR_NOKTA_DESKTOP/, 'quit must use the desktop bridge when present');

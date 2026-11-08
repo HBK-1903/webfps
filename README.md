@@ -86,7 +86,7 @@ Kod imzalama sertifikası olmadığı için Windows ilk çalıştırmada SmartSc
 
 ### Testler ve kalite kapısı
 ```bash
-npm test             # 119 test, tamamı headless (Node + jsdom)
+npm test             # 121 test, tamamı headless (Node + jsdom)
 npm run lint         # ESLint (gerçek hata odaklı kural seti)
 npm run verify       # lint + test + build — tek komutta tam doğrulama
 npm run qa           # scripted playtest → docs/QA-REPORT.md
@@ -227,7 +227,7 @@ src/
     scene.js  actorRigs.js  viewmodel.js  fx.js
   ui/                   # HUD, ses, ayarlar (localStorage)
   main.js               # uygulama kabuğu: menü akışı, input, pointer lock, render döngüsü
-tests/                  # 119 test (core, AI, nişan, HUD, PWA, e2e app boot)
+tests/                  # 121 test (core, AI, nişan, HUD, PWA, e2e app boot)
 tools/serve.mjs         # dev sunucusu
 tools/sim.mjs           # headless maç simülatörü
 build.mjs               # tek dosya offline build
@@ -240,7 +240,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 
 ## 5. Test raporu
 
-`npm test` → **119/119 geçti** (Node 22 + jsdom, headless):
+`npm test` → **121/121 geçti** (Node 22 + jsdom, headless):
 
 | Dosya | Kapsam |
 |---|---|
@@ -405,7 +405,21 @@ kendi harita bilgilerini doğru kullanmalarını sağladı.
     aynı sınıf hata. `pc.adsBlend` eklendi: koni ve arpacık artık aynı eğriyi kullanıyor, yarı nişanlı
     yarı yayılma demek. `tryShoot` hem `ads` (botlar için boolean) hem `adsBlend` (oyuncu için 0..1)
     kabul ediyor. `adsTarget` alanı da ölü kod olarak duruyordu, kaldırıldı.
-12. **Denge matrisi tek tohum bloğuna bağlıydı.** `tools/matrix.mjs` her koşuda aynı 1000 tabanlı tohumları
+12. **PWA kurulumu `npm run dev`'de çalışmıyordu, üretimde çalışıyordu.** İki ayrı hata üst üste
+    biniyordu:
+    - Manifest ve service worker `src/pwa/` içinde duruyor, dev sunucusu ise yalnızca depo kökünü
+      servis ediyordu → `/manifest.webmanifest` ve `/sw.js` **404**.
+    - Kayıt `new URL('./sw.js', import.meta.url)` ile yapılıyordu; bu *modülün* dizinine göre çözülür,
+      yani dev'de `/src/ui/sw.js` isteniyordu. Üstelik servis edilse bile bir worker'ın kapsamı kendi
+      dizinidir (`/src/ui/`), oyun sayfasını asla kontrol etmezdi. Derlenmiş sitede çalışmasının tek
+      sebebi esbuild'in her şeyi `sw.js`'in yanına koymasıydı — hatayı sürüm anına kadar saklayan
+      tam da bu farktı.
+
+    Düzeltme: kayıt belgeye göre çözülüyor (`document.baseURI`) ve kapsam belge dizini olarak açıkça
+    veriliyor; dev sunucusu iki dosyayı sanal yolla köke eşliyor (`src/pwa/` tek kaynak olarak kalıyor)
+    ve `Service-Worker-Allowed: /` başlığını gönderiyor. Üç regresyon testi eklendi, üçü de mutasyonla
+    sınandı.
+13. **Denge matrisi tek tohum bloğuna bağlıydı.** `tools/matrix.mjs` her koşuda aynı 1000 tabanlı tohumları
     kullanıyordu, yani "zorluk kademeleri monoton" iddiası tek bir blokla sınanıyordu ve blok yeniden
     üretilemiyordu. `--seed-base` eklendi; zorluk ayrımının kazanma oranı yerine K/D ve raund süresiyle
     okunması gerektiği de bu sırada ölçüldü (kazanma oranı bloklar arası ±10 puan oynuyor).
@@ -479,7 +493,7 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 119 headless test |
+| `npm test` | 121 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
 | `npm run verify` | lint + test + a11y + build |

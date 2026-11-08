@@ -16,6 +16,16 @@ const ROOT = process.env.SERVE_DIR
 const PORT = Number(process.env.PORT || (SITE_MODE ? 8080 : 5173));
 const HOST = process.env.HOST || '0.0.0.0';
 
+// Files that live in src/pwa/ but must be served from the site root, because a
+// manifest and a service worker are only found at their declared URL (the
+// worker's scope is its own directory, so it has to sit at the root). The site
+// build copies them there; the dev server maps them instead of duplicating them
+// in the repo, so there is one source of truth in both modes.
+const VIRTUAL = {
+  '/manifest.webmanifest': 'src/pwa/manifest.webmanifest',
+  '/sw.js': 'src/pwa/sw.js',
+};
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -41,7 +51,8 @@ const server = http.createServer((req, res) => {
   }
   if (urlPath.endsWith('/')) urlPath += 'index.html';
 
-  const filePath = path.resolve(ROOT, '.' + urlPath);
+  const virtual = SITE_MODE ? null : VIRTUAL[urlPath];
+  const filePath = path.resolve(ROOT, '.' + (virtual ? '/' + virtual : urlPath));
   if (!filePath.startsWith(ROOT)) {
     res.writeHead(403).end('Forbidden');
     return;
@@ -52,13 +63,18 @@ const server = http.createServer((req, res) => {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('404 Not found: ' + urlPath);
       return;
     }
-    res.writeHead(200, {
+    const headers = {
       'content-type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
       'cache-control': 'no-store',
       'access-control-allow-origin': '*',
       'cross-origin-opener-policy': 'same-origin',
       'cross-origin-embedder-policy': 'require-corp',
-    });
+    };
+    // Scope the worker to the whole site. Without this the browser limits it to
+    // the script's directory (and refuses a wider scope), which in dev would
+    // stop it from ever controlling the game page.
+    if (urlPath === '/sw.js') headers['service-worker-allowed'] = '/';
+    res.writeHead(200, headers);
     fs.createReadStream(filePath).pipe(res);
   });
 });

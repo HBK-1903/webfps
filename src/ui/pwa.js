@@ -48,8 +48,18 @@ export function registerServiceWorker({ onReady } = {}) {
   if (!isHttp || !('serviceWorker' in navigator)) return null;
   if (typeof onReady === 'function') onReady(canInstall());
 
-  // A failure here (private mode, blocked storage) must never stop the game.
-  return navigator.serviceWorker.register(new URL('./sw.js', import.meta.url), { scope: './' }).catch(() => null);
+  // Resolved against the *document*, not this module. With `import.meta.url`
+  // the path in development became /src/ui/sw.js (this file's directory) rather
+  // than /sw.js, so registration 404'd in the dev server. The built site worked
+  // only because it bundles everything next to sw.js, which is exactly the kind
+  // of difference between dev and production that hides bugs.
+  const swUrl = new URL('sw.js', document.baseURI);
+  // Scope must be the directory the game lives in, not the worker's own folder.
+  // With /src/ui/sw.js the browser would scope it to /src/ui/ and the worker
+  // would never control the game page at all. `/` is rejected when the worker
+  // sits in a subdirectory, so fall back to the document directory.
+  const scope = new URL('./', document.baseURI);
+  return navigator.serviceWorker.register(swUrl, { scope }).catch(() => null);
 }
 
 /** True when the browser has offered an install prompt we can fire later. */
