@@ -12,6 +12,17 @@ export const PLAYER = {
   height: 1.8,
   eyeHeight: 1.62,
   crouchEyeHeight: 1.05,
+  // Aim reference points on the body, in metres above the floor, measured while
+  // standing. They live here because the AI's aim point and the hit volumes are
+  // both derived from them: when these were separate literals, changing the
+  // hitbox silently moved where bots aimed.
+  chestHeight: 1.12,
+  crouchChestHeight: 0.78,
+  // How fast the sight settles onto the camera axis. The viewmodel uses the same
+  // rate, so the accuracy bonus and the visible sight arrive together (~200 ms
+  // to 95%). Raising one without the other re-introduces the mismatch where the
+  // cone was fully aimed while the sight was still off-axis.
+  adsLerpSpeed: 14,
   walkSpeed: 4.9,
   sprintSpeed: 6.6,
   crouchSpeed: 2.5,
@@ -115,6 +126,8 @@ export const DIFFICULTY = {
     fireAngleTolerance: 4.5, // degrees
     burstShots: 3,
     burstPause: 0.5,
+    recoilAimKick: 0.3, // degrees of climb added per shot inside a burst
+    headBias: 0.22, // 0 = chest, 1 = head centre
     fov: 112,
     viewDistance: 38,
     hearingRadius: 16,
@@ -138,6 +151,8 @@ export const DIFFICULTY = {
     fireAngleTolerance: 2.6,
     burstShots: 4,
     burstPause: 0.38,
+    recoilAimKick: 0.2,
+    headBias: 0.7,
     fov: 118,
     viewDistance: 44,
     hearingRadius: 18,
@@ -160,6 +175,8 @@ export const DIFFICULTY = {
     fireAngleTolerance: 1.6,
     burstShots: 7,
     burstPause: 0.24,
+    recoilAimKick: 0.05,
+    headBias: 0.8,
     fov: 135,
     viewDistance: 60,
     hearingRadius: 24,

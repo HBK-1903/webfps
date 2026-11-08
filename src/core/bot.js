@@ -7,7 +7,7 @@ import { moveCircle, losClear } from './collision.js';
 import { eyePoint, bodyRadius, hitVolumes } from './actor.js';
 import { directionFromAngles, performShot, anglesTo, castShot } from './combat.js';
 import { activeWeapon, updateWeapon, startReload, tryShoot, releaseTrigger, switchWeapon, cancelReload } from './weapon.js';
-import { ROUTES, ENEMY_SPAWN_AREA } from './map.js';
+import { ROUTES, ENEMY_SPAWN_AREA, SPAWNS, laneForMirroredSlot } from './map.js';
 import { getCoverPoints, pickCoverFor, hiddenFrom } from './cover.js';
 import { registerDamage } from './match.js';
 
@@ -40,6 +40,7 @@ export function createBrain(actor, profile, { rng = Math.random, lane = 'mid' } 
     aimErrorYaw: 0,
     aimErrorPitch: 0,
     aimErrorNext: 0,
+    recoilAccum: 0,
     // navigation
     path: [],
     pathGoal: null,
@@ -254,15 +255,26 @@ export function refreshHuntZones(coordinator, grid, rng, match) {
   }
 }
 
-// The map is 180° rotationally symmetric, so "north" for ALFA is the mirror of
-// "south" for BRAVO. Lane assignment must be rotated for team B as well,
-// otherwise one team ends up numerically stronger in mid.
-const LANE_PATTERN = ['mid', 'north', 'south', 'mid', 'north'];
-const ROTATE_LANE = { mid: 'mid', north: 'south', south: 'north' };
-
-export function laneForSlot(team, index) {
-  const base = LANE_PATTERN[index % LANE_PATTERN.length];
-  return team === 'B' ? ROTATE_LANE[base] : base;
+// Lane assignment lives in map.js next to ROUTES, because whether two lanes are
+// mirror images is a map fact, not an AI decision. Keep the derivation here so
+// the AI still records each bot's slot for jitter/spread purposes.
+//
+// The slot must come from the spawn row, never from `actor.index`: the human
+// player occupies ALFA's index 0, so index-based slots pushed every ALFA bot one
+// slot up and put every BRAVO bot on slot 0.
+export function laneSlot(actor) {
+  const row = SPAWNS[actor.team];
+  if (!row || !Number.isFinite(actor.spawnZ)) return 0;
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < row.length; i++) {
+    const d = Math.abs(row[i].z - actor.spawnZ);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
 }
 
 /**
@@ -288,9 +300,9 @@ export function assignLanes(match, coordinator) {
   for (const team of ['A', 'B']) {
     const bots = match.actors.filter((a) => a.team === team && a.brain);
     coordinator.lanes[team] = {};
-    const order = bots.slice().sort((a, b) => a.index - b.index);
+    const order = bots.slice().sort((a, b) => laneSlot(a) - laneSlot(b));
     for (const bot of order) {
-      const lane = laneForSlot(team, bot.index);
+      const lane = laneForMirroredSlot(team, laneSlot(bot));
       bot.brain.lane = lane;
       coordinator.lanes[team][bot.id] = lane;
     }
@@ -307,6 +319,39 @@ function wrapAngle(a) {
   if (r > Math.PI) r -= t;
   if (r < -Math.PI) r += t;
   return r;
+}
+
+/**
+ * Where a bot aims on an enemy's body.
+ *
+ * Bots used to aim at the *eye* point, which is inside the head sphere: every
+ * single shot at any range was a headshot (measured: 7/7 at 4-34 m), so a
+ * normal bot killed the player with ~0.3 s of contact. Aiming at the chest is
+ * what a human does; the difficulty then decides how far up the aim creeps.
+ * The head is still reachable, it just has to be earned.
+ */
+export function aimPoint(bot, target) {
+  const profile = bot.brain ? bot.brain.profile : null;
+  // 0 = middle of the chest, 1 = head centre. Bots start at the body and settle
+  // a little higher as their aim ramps up, but the difficulty decides the rest.
+  const base = profile ? headBias(profile) : 0.2;
+  const bias = Math.min(1, base + 0.2 * base * (bot.brain ? bot.brain.aimRamp : 0));
+  // Actors have no y field: they stand on the floor, so heights are absolute.
+  // The chest height is interpolated through the crouch blend rather than
+  // snapped at a threshold: `crouch` ramps from 0 to 1 over ~100ms, and a hard
+  // `crouch > 0.5` test made the whole aim point jump ~34 cm in one frame the
+  // instant a target crossed the midpoint — a bot would miss high for that
+  // frame no matter how well it was tracking.
+  const eyeY = eyePoint(target).y;
+  const standingChest = PLAYER.chestHeight;
+  const crouchedChest = PLAYER.crouchChestHeight;
+  const chestY = standingChest + (crouchedChest - standingChest) * target.crouch;
+  return { x: target.x, y: chestY + (eyeY - chestY) * bias, z: target.z };
+}
+
+/** How far up the body the profile aims, before aim-ramp (0 = chest, 1 = head). */
+function headBias(profile) {
+  return Math.max(0, Math.min(1, profile.headBias ?? 0.2));
 }
 
 /** Can `bot` see `target`? FOV cone + world LOS. No knowledge of unseen actors. */
@@ -384,8 +429,9 @@ function advanceGoal(bot, grid) {
   const lane = brain.lane;
   const route = routePoint(bot, lane, brain.laneIndex);
   if (!route) return null;
-  const jitterX = ((bot.index % 3) - 1) * 1.6;
-  const jitterZ = (bot.index % 2 === 0 ? 1 : -1) * 1.2;
+  const slot = laneSlot(bot);
+  const jitterX = ((slot % 3) - 1) * 1.6;
+  const jitterZ = (slot % 2 === 0 ? 1 : -1) * 1.2;
   const gx = route.x + jitterX;
   const gz = route.z + jitterZ;
   const cell = grid.nearestWalkable(gx, gz);
@@ -464,8 +510,10 @@ function combatTick(match, bot, dt, ctx) {
   }
   const a = bot;
   const eye = eyePoint(a);
-  const tEye = eyePoint(target);
-  const angles = anglesTo(eye, tEye);
+  const angles = anglesTo(eye, aimPoint(a, target));
+
+  // Recoil climb decays between bursts (and inside long pauses).
+  brain.recoilAccum = Math.max(0, (brain.recoilAccum || 0) - profile.recoilAimKick * 2.6 * dt);
 
   // Aim error: persistent offset that drifts, shrinking as the bot keeps track.
   brain.aimErrorNext -= dt;
@@ -510,19 +558,31 @@ function combatTick(match, bot, dt, ctx) {
     Math.abs(angles.pitch - a.pitch) * (180 / Math.PI);
   const ready = brain.reactionTimer <= 0 && brain.aimRamp > 0.25;
   const aligned = aimErrorDeg < profile.fireAngleTolerance + (1 - brain.aimRamp) * profile.aimError;
-  if (brain.burstLeft <= 0 && brain.burstPause <= 0) brain.burstLeft = profile.burstShots;
+  if (brain.burstLeft <= 0 && brain.burstPause <= 0) {
+    brain.burstLeft = profile.burstShots;
+  }
 
   if (ready && aligned && brain.burstPause <= 0 && brain.burstLeft > 0) {
+    // Recoil throws the rounds off the aim line. Without this a burst stays
+    // pixel-accurate and every burst is a guaranteed headshot chain; the climb
+    // is what makes bursts a trade-off instead of a free kill.
+    const recoilKick = brain.recoilAccum || 0;
     const shot = tryShoot(w, {
-      aimPitch: a.pitch,
+      aimPitch: a.pitch + recoilKick * (Math.PI / 180),
       aimYaw: a.yaw,
-      moving: a.speedFactor > 0.3,
-      ads: true,
+      moving: bot.speedFactor > 0.3,
+      ads: brain.aimRamp > 0.5,
       triggerHeld: w.triggerHeld,
       rng: brain.rng,
     });
     if (shot) {
       brain.shots++;
+      // Climb through the burst: each round leaves a little higher than the
+      // last, and it decays back down between bursts (see combatTick). This is
+      // what stops a burst from being four guaranteed headshots.
+      brain.recoilAccum = Math.min(profile.recoilAimKick * 3,
+        (brain.recoilAccum || 0) + profile.recoilAimKick);
+      w.recoilPitch = 0; // the bot owns its climb; do not let it pile up here
       const dir = directionFromAngles(shot.yaw, shot.pitch);
       const result = performShot({ attacker: a, origin: eye, dir, actors: match.actors, boxes: ctx.boxes, weapon: w.def });
       if (result.hit) {
@@ -606,7 +666,6 @@ export function separateFromOthers(match, bot, boxes, separateRadius = 0.92) {
  */
 function updateCoverDecision(match, bot, grid, boxes, ctx) {
   const brain = bot.brain;
-  if (globalThis.__NOCOVER) { brain.coverSpot = null; return; }
   const prof = brain.profile;
   const threat = brain.targetVisible ? brain.target : null;
   const shotAt = bot.lastDamageAt > match.time - 1.2;
@@ -762,8 +821,7 @@ export function updateBot(match, bot, dt, ctx) {
   if (bot.lastDamageAt > match.time - 0.35 && ctx.coordinator && brain.rng() < prof.coordination) {
     callForHelp(ctx.coordinator, bot, match.time);
   }
-  if (globalThis.__NOSUPPORT) bot.brain.supportCall = null;
-  const distress = globalThis.__NOSUPPORT ? null : latestHelp(ctx.coordinator, bot.team, match.time, bot.id);
+  const distress = latestHelp(ctx.coordinator, bot.team, match.time, bot.id);
   brain.supportCall = distress;
   if (distress && match.time > brain.supportCooldown) {
     const allyDist = Math.hypot(distress.x - bot.x, distress.z - bot.z);
@@ -1127,26 +1185,7 @@ export function notifyHit(actor, attackerId, time) {
   actor.lastAttackerId = attackerId;
 }
 
-/** Bot weapon ammo snapshot for HUD/debug. */
-export function botAmmo(bot) {
-  const w = activeWeapon(bot.loadout);
-  return { mag: w.mag, reserve: w.reserve, name: w.def.shortName, reloading: w.reloading };
-}
 
-/** Debug: where a bot thinks the threat is. */
-export function botDebug(bot) {
-  const b = bot.brain;
-  return {
-    state: b.state,
-    lane: b.lane,
-    targetId: b.target ? b.target.id : 0,
-    visible: b.targetVisible,
-    lastSeen: b.lastSeen,
-    shots: b.shots,
-    hits: b.hits,
-    status: b.statusText,
-  };
-}
 
 export { hitVolumes, bodyRadius, castShot, MATCH };
 

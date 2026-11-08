@@ -2,29 +2,7 @@
 // objects so the exact same code runs for the player, the bots and the bullets,
 // and can be unit tested without a renderer.
 
-/** Expand boxes by `radius` so a circle can be resolved as a point. */
-export function inflateBoxes(boxes, radius) {
-  return boxes.map((b) => ({
-    minX: b.minX - radius,
-    maxX: b.maxX + radius,
-    minY: b.minY,
-    maxY: b.maxY,
-    minZ: b.minZ - radius,
-    maxZ: b.maxZ + radius,
-    kind: b.kind,
-  }));
-}
 
-export function pointInBox(p, b, pad = 0) {
-  return (
-    p.x > b.minX - pad &&
-    p.x < b.maxX + pad &&
-    p.z > b.minZ - pad &&
-    p.z < b.maxZ + pad &&
-    p.y > b.minY - pad &&
-    p.y < b.maxY + pad
-  );
-}
 
 export function circleOverlapsBox(x, z, radius, b) {
   const cx = Math.min(Math.max(x, b.minX), b.maxX);

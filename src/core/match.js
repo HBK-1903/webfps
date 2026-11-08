@@ -1,7 +1,7 @@
 // Match / round state machine. One authority for score, round phase and clock.
 // The renderer and the AI only read from this; nothing else mutates the score.
 
-import { MATCH, PLAYER, DIFFICULTY } from './config.js';
+import { MATCH, DIFFICULTY } from './config.js';
 import { createActor, resetActorForRound, markDead, NAMES_A, NAMES_B } from './actor.js';
 import { SPAWNS } from './map.js';
 
@@ -57,9 +57,6 @@ export function createMatch({ difficulty = 'normal' } = {}) {
   return match;
 }
 
-export function actorsOfTeam(match, team) {
-  return match.actors.filter((a) => a.team === team);
-}
 
 export function aliveCount(match, team) {
   let n = 0;
@@ -275,12 +272,3 @@ export function drainEvents(match) {
   return e;
 }
 
-export function healthSummary(actor) {
-  return {
-    health: Math.round(actor.health),
-    armor: Math.round(actor.armor),
-    maxHealth: PLAYER.maxHealth,
-    maxArmor: PLAYER.maxArmor,
-    alive: actor.alive,
-  };
-}

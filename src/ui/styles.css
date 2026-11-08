@@ -117,6 +117,28 @@ html, body {
 .btn.danger { border-left-color: var(--danger); }
 .btn.danger:hover { background: rgba(224, 90, 74, 0.16); border-color: var(--danger); }
 
+.btn-install {
+  border-left-color: var(--accent);
+  color: #eafcfb;
+  background: rgba(79, 209, 197, 0.08);
+}
+.btn-install::before {
+  content: '⤓';
+  margin-right: 10px;
+  font-size: 1.05em;
+  vertical-align: -0.05em;
+}
+.btn-install[hidden] { display: none; }
+
+.menu-note {
+  margin: -4px 0 0;
+  color: var(--text-dim);
+  font-size: clamp(10px, 1.3vmin, 12px);
+  letter-spacing: 0.06em;
+  text-align: center;
+  z-index: 2;
+}
+
 .menu-foot {
   display: flex;
   gap: 18px;
@@ -375,15 +397,18 @@ kbd {
 .vital.low span:not(.vital-icon) { color: var(--danger); }
 .vital.low #health-bar { background: var(--danger); }
 
-.crosshair-wrap {
-  position: relative;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 120px;
+/* Reticle layer: the exact centre of the viewport. The camera looks along the
+   centre of the canvas, so anything else misrepresents where bullets go. */
+.reticle-layer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  z-index: 11;
+  pointer-events: none;
 }
-.crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --gap: 6px; }
+.crosshair { position: absolute; left: 0; top: 0; width: 0; height: 0; --gap: 6px; }
 .crosshair .ch { position: absolute; background: #eafcfb; box-shadow: 0 0 3px rgba(0, 0, 0, 0.9); }
 .ch-top { width: 2px; height: 7px; left: -1px; top: calc(-1 * var(--gap) - 7px); }
 .ch-bottom { width: 2px; height: 7px; left: -1px; top: var(--gap); }
@@ -391,7 +416,7 @@ kbd {
 .ch-right { height: 2px; width: 7px; top: -1px; left: var(--gap); }
 .ch-dot { position: absolute; width: 2px; height: 2px; left: -1px; top: -1px; background: rgba(234, 252, 251, 0.8); }
 
-.hitmarker { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; }
+.hitmarker { position: absolute; left: 0; top: 0; width: 0; height: 0; opacity: 0; }
 .hitmarker.on { opacity: 1; }
 .hitmarker i {
   position: absolute;
@@ -407,7 +432,7 @@ kbd {
 
 .reload-ring {
   position: absolute;
-  left: 50%; top: 50%;
+  left: 0; top: 0;
   transform: translate(-50%, -50%);
   width: 64px; height: 64px;
   display: flex;
@@ -535,7 +560,6 @@ kbd {
   .killfeed { top: 104px; }
 }
 @media (max-height: 560px) {
-  .crosshair-wrap { height: 80px; }
   .killfeed { top: 88px; }
 }
 

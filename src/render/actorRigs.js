@@ -75,7 +75,6 @@ export function createRig(actor) {
   return root;
 }
 
-const tmpVec = new THREE.Vector3();
 
 /**
  * Update one rig from the actor's positional state.
@@ -105,11 +104,6 @@ export function updateRig(rig, actor, dt, time, isPlayer) {
   if (isPlayer) rig.visible = false;
 }
 
-export function muzzleWorldPosition(rig) {
-  const u = rig.userData;
-  u.flash.getWorldPosition(tmpVec);
-  return tmpVec;
-}
 
 export function disposeRig(rig) {
   rig.traverse((o) => {

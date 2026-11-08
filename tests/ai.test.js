@@ -298,20 +298,37 @@ test('a bot walks its lane instead of ping-ponging on one waypoint', () => {
   updateMatch(match, 1 / 60);
   const watched = match.actors.filter((a) => a.brain);
   const startPos = new Map(watched.map((a) => [a.id, { x: a.x, z: a.z }]));
+  // Track the furthest point each bot reached *within the round*. Sampling only
+  // the final position would test the wrong thing: the round ends after ~15 s,
+  // the next round respawns everyone, and a bot that walked 24 m across the map
+  // would look "stuck in spawn" simply because it was reset there.
+  const best = new Map(watched.map((a) => [a.id, 0]));
+  const bestLane = new Map(watched.map((a) => [a.id, 0]));
+  const roundAtStart = match.round;
   for (let i = 0; i < 60 * 20; i++) {
+    if (match.round !== roundAtStart) break;
     match.time += 1 / 60;
     updateMatch(match, 1 / 60);
     for (const b of match.actors) if (b.brain && b.alive) updateBot(match, b, 1 / 60, { grid, boxes: MAP_AABBS, coordinator: coord });
+    for (const bot of watched) {
+      const start = startPos.get(bot.id);
+      if (!start) continue;
+      best.set(bot.id, Math.max(best.get(bot.id), Math.hypot(bot.x - start.x, bot.z - start.z)));
+      bestLane.set(bot.id, Math.max(bestLane.get(bot.id), bot.brain.laneIndex));
+    }
   }
+  // The round legitimately ends before the loop does (a squad wipes the other).
+  // What matters is that every bot made progress while it was being played, so
+  // stop at the round boundary and judge on the best values collected so far.
+  assert.ok(best.size === watched.length);
   // Every bot must be out of its spawn slot, or at least have consumed a lane
   // waypoint. A stuck queue in the spawn door leaves bots with lane index 0 and
   // a metre of net movement for the whole round.
   for (const bot of watched) {
-    const start = startPos.get(bot.id);
-    const displaced = Math.hypot(bot.x - start.x, bot.z - start.z);
+    const displaced = best.get(bot.id);
     assert.ok(
-      bot.brain.laneIndex > 0 || displaced > 6,
-      `${bot.name} is still in its spawn slot after 20 s (lane index ${bot.brain.laneIndex}, ${displaced.toFixed(1)} m from start)`,
+      bestLane.get(bot.id) > 0 || displaced > 6,
+      `${bot.name} never left its spawn slot (lane index ${bestLane.get(bot.id)}, ${displaced.toFixed(1)} m from start)`,
     );
   }
 });

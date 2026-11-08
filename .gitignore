@@ -4,3 +4,9 @@ dist/*
 !dist/SifirNokta.html
 *.log
 .DS_Store
+
+# Desktop packaging output (large, reproducible with `npm run app:dist`)
+dist-app/
+
+# Site build output (reproducible with `npm run build:site`)
+dist/site/

@@ -36,6 +36,7 @@ import { loadSettings, saveSettings, sanitize } from './ui/settings.js';
 import GUI from 'lil-gui';
 import { WEAPONS as TUNING_WEAPONS, DIFFICULTY as TUNING_DIFFICULTY, PLAYER as TUNING_PLAYER, COMBAT as TUNING_COMBAT } from './core/config.js';
 import { setDifficulty } from './core/game.js';
+import { registerServiceWorker, createInstallControls } from './ui/pwa.js';
 
 
 const $ = (id) => document.getElementById(id);
@@ -100,6 +101,11 @@ function boot() {
 
   bindUI();
   bindInput(canvas);
+
+  // Installed-app support. On file:// this is a no-op, so the offline
+  // single-file build keeps working exactly as before.
+  setupInstallControls();
+  registerServiceWorker();
   window.addEventListener('resize', onResize);
   onResize();
 
@@ -334,6 +340,10 @@ function bindUI() {
       case 'rematch':
         startMatchFlow(app.settings.difficulty);
         break;
+      case 'install':
+        // The button has its own click handler; stop the nav handler from
+        // firing a second prompt.
+        break;
       case 'quit':
         quitGame();
         break;
@@ -535,8 +545,25 @@ function isPointerLocked() {
 }
 
 function quitGame() {
+  // Desktop build: the preload bridge can close the window for real.
+  const desktop = window.SIFIR_NOKTA_DESKTOP;
+  if (desktop && desktop.isDesktop) {
+    desktop.quit();
+    return;
+  }
   if (typeof window.close === 'function') window.close();
   showToast('Tarayıcı penceresi kapatılamadı. Sekmeyi kapatabilirsin.', 3000);
+}
+
+// -------------------------------------------------------- install (PWA) ---
+// The browser decides whether the game may be installed; src/ui/pwa.js owns
+// that logic (and its tests). Here we only pass in the DOM and the toast.
+function setupInstallControls() {
+  app.installControls = createInstallControls({
+    button: $('install-btn'),
+    hint: $('install-hint'),
+    notify: (message) => showToast(message, 2600),
+  });
 }
 
 let toastTimer = 0;
@@ -664,6 +691,11 @@ function renderGame(dt) {
   const eye = eyePoint(game.player);
 
   // Camera: yaw/pitch from the controller plus a gentle bob and a small kick.
+  //
+  // The bob is a *cosmetic* offset applied after the aim direction is fixed, so
+  // it must not move the crosshair relative to the world. It is tiny (1.8 cm)
+  // and at 20 m that is still ~0.05 deg, so the reticle stays honest; the
+  // recoil kick is the larger one and is deliberately visible.
   const bob = Math.sin(game.pc.bobPhase) * 0.018 * game.player.speedFactor;
   camera.position.set(eye.x, eye.y + bob, eye.z);
   const kick = (game.pc.kickPitch * Math.PI) / 180;
@@ -700,7 +732,9 @@ function renderGame(dt) {
   setViewModelWeapon(app.viewmodel, game.player.loadout.current);
   applyPose(app.viewmodel, {
     speedFactor: game.player.speedFactor,
-    adsBlend: game.pc.ads ? 1 : 0,
+    // The core's blend, not a 0/1 flag: the sight and the spread cone must
+    // animate on the same curve or the reticle lies during the transition.
+    adsBlend: game.pc.adsBlend,
     dt,
     sprinting: game.pc.sprint,
   });

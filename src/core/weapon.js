@@ -95,9 +95,6 @@ export function canFire(w) {
   return !w.reloading && !w.switching && w.cooldown <= 0 && w.mag > 0;
 }
 
-export function needsReload(w) {
-  return w.mag <= 0 && w.reserve > 0;
-}
 
 export function startReload(w) {
   if (w.reloading || w.switching) return false;
@@ -128,7 +125,16 @@ export function cancelReload(w) {
  * Try to fire one shot. Returns a shot description or null.
  * The caller turns this into a raycast and damage.
  */
-export function tryShoot(w, { aimPitch = 0, aimYaw = 0, moving = false, ads = false, triggerHeld, rng = Math.random } = {}) {
+/**
+ * @param {object} opts
+ * @param {boolean|number} [opts.ads] `true`/`false` for an on/off caller (bots),
+ *   or a 0..1 blend for the player. A partial blend gives a partial spread
+ *   reduction, which is what makes the cone track the sight instead of
+ *   snapping to fully-aimed the instant the button is pressed.
+ */
+export function tryShoot(w, { aimPitch = 0, aimYaw = 0, moving = false, ads = false, adsBlend, triggerHeld, rng = Math.random } = {}) {
+  // `adsBlend` wins when present: it is the continuous version of `ads`.
+  const blend = adsBlend === undefined ? (ads ? 1 : 0) : Math.max(0, Math.min(1, adsBlend));
   if (!canFire(w)) return null;
   // Semi-auto weapons need a fresh click; the caller passes the live trigger
   // state so a latched trigger (e.g. after a weapon switch) blocks the shot.
@@ -137,7 +143,8 @@ export function tryShoot(w, { aimPitch = 0, aimYaw = 0, moving = false, ads = fa
   // Recoil/spread: the shot leaves with the current cone half-angle.
   const sp = w.def.spread;
   const moveMul = moving ? sp.moveFactor : 1;
-  const adsMul = ads ? sp.adsFactor : 1;
+  // Interpolate between hip and aimed cone, not between 0 and the multiplier.
+  const adsMul = 1 + (sp.adsFactor - 1) * blend;
   const half = Math.min(sp.max, w.spread) * moveMul * adsMul;
   const yawOffset = (rng() * 2 - 1) * half;
   const pitchOffset = (rng() * 2 - 1) * half * 0.75;
@@ -146,7 +153,10 @@ export function tryShoot(w, { aimPitch = 0, aimYaw = 0, moving = false, ads = fa
   w.triggerHeld = true;
   w.shotsFired += 1;
   w.spread = Math.min(sp.max, w.spread + sp.perShot);
-  w.recoilPitch += w.def.recoil.pitch * (ads ? 0.75 : 1);
+  // Recoil accumulates through a burst and is drained by the controller
+  // (`updateWeapon`/`absorbRecoil`). It used to be *set* here and then zeroed
+  // after a single read, so a burst had exactly the climb of one shot.
+  w.recoilPitch = Math.min(8, w.recoilPitch + w.def.recoil.pitch * (1 + (0.75 - 1) * blend));
   w.recoilYaw += (rng() * 2 - 1) * w.def.recoil.yaw;
   return {
     weaponId: w.id,
@@ -187,9 +197,6 @@ export function ammoInfo(loadout) {
 
 export function degToRad(d) {
   return (d * Math.PI) / 180;
-}
-export function radToDeg(r) {
-  return (r * 180) / Math.PI;
 }
 export function clampPitch(p) {
   const lim = degToRad(89);

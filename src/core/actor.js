@@ -46,6 +46,9 @@ export function createActor({ team, name, isPlayer = false, index = 0 }) {
 export function resetActorForRound(actor, spawn) {
   actor.x = spawn.x;
   actor.z = spawn.z;
+  // Remembered so the AI can tell which slot of the spawn row this is, even
+  // after the bot has walked away (see laneSlot in bot.js).
+  actor.spawnZ = spawn.z;
   actor.yaw = spawn.yaw;
   actor.pitch = 0;
   actor.vx = 0;
@@ -99,14 +102,23 @@ export function bodyRadius(actor) {
 export function hitVolumes(actor) {
   const eye = eyeHeight(actor);
   const scale = 1 - 0.18 * actor.crouch;
+  // Head sphere centred on eye level (where a human head is), sized like one:
+  // r = 0.16 gives a 32 cm band. The old 0.21 gave a 42 cm band that started
+  // *inside* the torso, which is why almost every bot kill was a headshot.
+  const headY = eye - 0.02 * scale;
+  const headR = 0.2;
   return {
-    head: { x: actor.x, y: eye - 0.06 * scale, z: actor.z, r: 0.23 },
+    head: { x: actor.x, y: headY, z: actor.z, r: headR },
     body: {
       x: actor.x,
       z: actor.z,
       r: bodyRadius(actor),
       minY: 0.25 * scale,
-      maxY: eye - 0.26 * scale,
+      // The torso must stop *below* the head sphere. When the two volumes
+      // overlapped (body up to 1.36, head down to 1.33), a ray aimed at the
+      // upper chest still resolved as a headshot, so bots effectively could not
+      // hit anything else: 100% of their burst kills were headshots.
+      maxY: headY - headR,
     },
     headMultiplier: COMBAT.headMultiplier,
   };

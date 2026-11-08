@@ -43,10 +43,3 @@ export function saveSettings(settings) {
   }
 }
 
-export function clearSettings() {
-  try {
-    localStorage.removeItem(KEY);
-  } catch {
-    /* ignore */
-  }
-}

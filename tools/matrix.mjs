@@ -2,8 +2,10 @@
 // Balance matrix: plays many matches per (difficulty, player mode) cell and
 // prints a compact table of outcome rates. Used to keep difficulty honest.
 //
-//   node tools/matrix.mjs [--matches N] [--json]
+//   node tools/matrix.mjs [--matches N] [--seed-base N] [--json]
 
+import { eyePoint } from '../src/core/actor.js';
+import { PLAYER } from '../src/core/config.js';
 import { createGame, updateGame } from '../src/core/game.js';
 import { resetActorIds } from '../src/core/actor.js';
 import { PHASE } from '../src/core/match.js';
@@ -15,6 +17,11 @@ const flag = (name, fallback) => {
   return i >= 0 && args[i + 1] ? Number(args[i + 1]) : fallback;
 };
 const MATCHES = flag('matches', 12);
+// Seed base lets a run be repeated on a disjoint block of matches. A single
+// block can be 10 points off across difficulties (absolute win rates are noisy
+// even though the simulation is deterministic), so a claim about a difficulty
+// tier should be checked on at least two bases before it is believed.
+const SEED_BASE = flag('seed-base', 1000);
 const WANT_JSON = args.includes('--json');
 
 /** `idle` player stands still at spawn; `auto` aims and fires at the closest enemy. */
@@ -43,7 +50,18 @@ function playMatch(difficulty, seed, playerMode) {
           }
         }
         game.pc.yaw = Math.atan2(best.x - p.x, -(best.z - p.z));
-        game.pc.pitch = 0;
+        // Aim at the target's chest, not at the horizon. With pitch=0 this
+        // harness only hits the legs of anyone standing on another platform,
+        // and it stopped being a fair proxy once bots started aiming at the
+        // body: it was measuring the harness's blind spot, not the game.
+        const eyeY = eyePoint(p).y;
+        const dx = best.x - p.x;
+        const dz = best.z - p.z;
+        // Chest height, not a literal: this harness is a stand-in for a player,
+        // so it must aim where a player would. The previous 1.15 was within 3cm
+        // of PLAYER.chestHeight and drifted silently when the body moved.
+        const chestY = PLAYER.chestHeight + (PLAYER.crouchChestHeight - PLAYER.chestHeight) * best.crouch;
+        game.pc.pitch = Math.atan2(chestY - eyeY, Math.hypot(dx, dz));
         game.input.fire = bd < 45;
       } else {
         game.input.fire = false;
@@ -84,7 +102,7 @@ for (const difficulty of ['easy', 'normal', 'hard']) {
     let timeSum = 0;
     let timeCount = 0;
     for (let i = 0; i < MATCHES; i++) {
-      const r = playMatch(difficulty, 1000 + i * 37, mode);
+      const r = playMatch(difficulty, SEED_BASE + i * 37, mode);
       if (r.finished) finished++;
       if (r.winner === 'A') winsA++;
       rounds += r.rounds;
