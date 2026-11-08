@@ -11,6 +11,8 @@ import { createBrain, createCoordinator, assignLanes, updateBot, BOT_STATE, refr
 import { activeWeapon, ammoInfo, releaseTrigger } from './weapon.js';
 import { eyePoint } from './actor.js';
 import { notifyHit, hearSound, canSee } from './bot.js';
+// Pure geometry, no THREE and no DOM: safe to import from the core layer.
+import { faceNormal, sparkBurst, offsetAlong } from '../render/impact.js';
 
 /**
  * Shortest distance from point `p` to the segment a-b, in the xz plane.
@@ -98,10 +100,22 @@ export function createGame({ difficulty = 'normal', seed = 12345, grid = null } 
   return game;
 }
 
+// Caps. Marks are the only FX that accumulate, so they get a hard ceiling:
+// 96 quads is invisible in cost and roughly "a firefight's worth of holes" —
+// a hundred extra muzzle flashes is not worth a growing draw call.
+const MARKS_MAX = 96;
+const SPARKS_MAX = 160;
+
 export function createFxState() {
   return {
     tracers: [],
+    // Brief flash at the impact point.
     impacts: [],
+    // Persistent bullet marks on surfaces, with the face normal they need in
+    // order to lie flat against the thing they were shot into.
+    marks: [],
+    // Spark debris, simulated here and drawn by render/fx.js.
+    sparks: [],
     hitmarker: 0,
     hitmarkerKill: false,
     damageFlash: 0,
@@ -117,6 +131,11 @@ export function createFxState() {
 export function clearTransientFx(fx) {
   fx.tracers.length = 0;
   fx.impacts.length = 0;
+  // Marks are cleared with the rest: they belong to the map, and the map is
+  // rebuilt between rounds. A mark left over from a previous round would be
+  // floating exactly where a wall used to be.
+  fx.marks.length = 0;
+  fx.sparks.length = 0;
   fx.hitmarker = 0;
   fx.damageFlash = 0;
   fx.sounds.length = 0;
@@ -471,9 +490,42 @@ function addTracer(fx, from, to, type) {
   if (fx.tracers.length > 40) fx.tracers.shift();
 }
 
+/**
+ * Register a bullet impact: a flash, a persistent mark and a burst of debris.
+ *
+ * `box` is the map box that was hit, or null for a body. The face normal is
+ * computed here rather than in the renderer because it belongs to the same
+ * moment as the hit — the renderer only knows where, not what it stuck into.
+ */
 function addImpact(fx, point, box) {
+  const face = box ? faceNormal(box, point) : null;
+  const normal = face ? face.normal : [0, 1, 0];
+
+  // The flash: brief and bright.
   fx.impacts.push({ x: point.x, y: point.y, z: point.z, age: 0, life: 0.25, kind: box ? box.kind : 'actor' });
   if (fx.impacts.length > 30) fx.impacts.shift();
+
+  // The mark: stays. Skipped on body hits, where a decal would be attached to
+  // nothing and would hang in the air after the corpse is gone.
+  if (box) {
+    const p = offsetAlong(point, normal);
+    fx.marks.push({ x: p.x, y: p.y, z: p.z, nx: normal[0], ny: normal[1], nz: normal[2], age: 0, kind: box.kind });
+    if (fx.marks.length > MARKS_MAX) fx.marks.shift();
+  }
+
+  // The debris. Sparks only come off hard surfaces; a body hit already has a
+  // hitmarker and blood is a separate question.
+  if (box && fx.sparks.length < SPARKS_MAX) {
+    const burst = sparkBurst(normal, 6, Math.random, 0.8, 3.4);
+    for (const b of burst) {
+      if (fx.sparks.length >= SPARKS_MAX) break;
+      fx.sparks.push({
+        x: point.x, y: point.y, z: point.z,
+        vx: b.vx, vy: b.vy, vz: b.vz,
+        age: 0, life: 0.35 + Math.random() * 0.25,
+      });
+    }
+  }
 }
 
 function decayFx(fx, dt) {
@@ -481,6 +533,17 @@ function decayFx(fx, dt) {
   fx.tracers = fx.tracers.filter((t) => t.age < t.life);
   for (const i of fx.impacts) i.age += dt;
   fx.impacts = fx.impacts.filter((i) => i.age < i.life);
+  // Sparks integrate here, in the deterministic simulation, so their arc is
+  // part of the game state rather than something the renderer invents per
+  // frame. That also means a test can assert they fall.
+  for (const sp of fx.sparks) {
+    sp.x += sp.vx * dt;
+    sp.y += sp.vy * dt;
+    sp.z += sp.vz * dt;
+    sp.vy -= 9.8 * dt;
+    sp.age += dt;
+  }
+  fx.sparks = fx.sparks.filter((sp) => sp.age < sp.life);
   fx.hitmarker = Math.max(0, fx.hitmarker - dt);
   fx.damageFlash = Math.max(0, fx.damageFlash - dt * 1.8);
   for (const k of fx.killfeed) k.age += dt;

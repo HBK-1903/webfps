@@ -602,7 +602,49 @@ async function main() {
   });
   await page.waitForTimeout(300);
 
-  // ── 13. console ───────────────────────────────────────────────────────────
+  // ── 13. bullet impacts ────────────────────────────────────────────────────
+  // The impact system has three parts that can each fail silently: no mark is
+  // recorded, marks are recorded with a zero normal (so they lie flat in the
+  // air), or sparks are thrown into the surface they came from. All three are
+  // checked against the live game state, not against a screenshot.
+  const impacts = await page.evaluate(async () => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    if (!app?.game) return { error: 'oyun yok' };
+    const game = app.game;
+    // Aim at the nearest wall and hold the trigger.
+    game.pc.yaw = -Math.PI / 2;
+    game.pc.pitch = 0;
+    game.input.fire = true;
+    const startMarks = game.fx.marks.length;
+    await new Promise((r) => setTimeout(r, 6000));
+    game.input.fire = false;
+    await new Promise((r) => setTimeout(r, 400));
+    const marks = game.fx.marks.slice(-8);
+    const badNormals = marks.filter((m) => Math.hypot(m.nx, m.ny, m.nz) < 0.5).length;
+    return {
+      shots: game.matchStats.shots,
+      newMarks: game.fx.marks.length - startMarks,
+      badNormals,
+      sample: marks[0] ? { n: [marks[0].nx, marks[0].ny, marks[0].nz] } : null,
+    };
+  });
+  measurements.impacts = impacts;
+  if (impacts.error) {
+    step('Çarpma efekti', false, impacts.error);
+  } else {
+    step(
+      'Kurşun izi bırakıyor',
+      impacts.newMarks > 0,
+      `${impacts.shots} atış, ${impacts.newMarks} yeni iz`,
+    );
+    step(
+      'İzlerin yüzey normali geçerli',
+      impacts.badNormals === 0,
+      impacts.badNormals ? `${impacts.badNormals} izde normal sıfır` : 'hepsi birim vektör',
+    );
+  }
+
+  // ── 14. console ───────────────────────────────────────────────────────────
   step('Konsol hatası yok', errors.length === 0, errors.length ? errors.slice(0, 2).join(' | ') : 'temiz');
 
   await browser.close();
