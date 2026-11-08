@@ -548,7 +548,61 @@ async function main() {
     if (app?.game?.pc) app.game.pc.yaw = 0;
   });
 
-  // ── 12. console ───────────────────────────────────────────────────────────
+  // ── 12. career screen ─────────────────────────────────────────────────────
+  // Two failure modes worth catching: the screen does not render at all, and a
+  // corrupt stored career takes the whole screen down instead of degrading.
+  await page.evaluate(() => {
+    // A hand-edited file with impossible numbers, a broken history entry and a
+    // NaN. If sanitisation is doing its job this renders cleanly.
+    const now = new Date().toISOString();
+    window.localStorage.setItem('sifirnokta.career.v1', JSON.stringify({
+      matches: 4, wins: 99, losses: -3, kills: 'çok', deaths: 20,
+      shots: 400, hits: 9999, headshots: NaN, playtimeSeconds: 900,
+      byDifficulty: { hard: { matches: 2, wins: 5, kills: 10, deaths: 8, shots: 100, hits: 40 } },
+      history: [null, 'çöp', { at: now, difficulty: 'hard', win: true, scoreA: 3, scoreB: 1, kills: 9, deaths: 4, shots: 80, hits: 40, kd: 99 }],
+    }));
+  });
+  await page.evaluate(() => {
+    const before = document.getElementById('menu');
+    const btn = [...before.querySelectorAll('button')].find((b) => /KARİYER/.test(b.textContent || ''));
+    if (btn) btn.click();
+  });
+  await page.waitForTimeout(500);
+  const career = await page.evaluate(() => {
+    const screen = document.getElementById('career-screen');
+    const visible = screen && !screen.classList.contains('hidden');
+    const highlights = [...screen.querySelectorAll('.career-highlight b')].map((b) => b.textContent);
+    // A NaN or Infinity leaking through sanitisation would render as these.
+    const text = screen.textContent || '';
+    return {
+      visible,
+      highlights,
+      rows: screen.querySelectorAll('.career-row').length,
+      winRate: highlights[0],
+      hasBadValue: /NaN|Infinity|undefined/.test(text),
+    };
+  });
+  measurements.career = career;
+  step('Kariyer ekranı açılıyor', career.visible, career.highlights.join(' / '));
+  step(
+    'Bozuk kariyer dosyası çökertmiyor',
+    career.visible && !career.hasBadValue,
+    career.hasBadValue ? 'ekranda NaN/Infinity/undefined var' : 'temiz',
+  );
+  step(
+    'Galibiyet oranı %100 ü geçmiyor',
+    career.winRate === '100%',
+    `gösterilen ${career.winRate} (dosyada 4 maçta 99 galibiyet yazıyordu)`,
+  );
+  await page.evaluate(() => {
+    window.localStorage.removeItem('sifirnokta.career.v1');
+    const screen = document.getElementById('career-screen');
+    const back = [...screen.querySelectorAll('button')].find((b) => /GERİ/.test(b.textContent || ''));
+    if (back) back.click();
+  });
+  await page.waitForTimeout(300);
+
+  // ── 13. console ───────────────────────────────────────────────────────────
   step('Konsol hatası yok', errors.length === 0, errors.length ? errors.slice(0, 2).join(' | ') : 'temiz');
 
   await browser.close();

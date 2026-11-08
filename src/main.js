@@ -4,6 +4,14 @@
 
 import { GAME_TITLE, GAME_VERSION, WEAPONS, DIFFICULTY } from './core/config.js';
 import {
+  loadCareer,
+  recordMatch,
+  clearCareer,
+  careerSummary,
+  accuracyTrend,
+  formatDuration,
+} from './core/career.js';
+import {
   createGame,
   updateGame,
   hudState,
@@ -48,6 +56,7 @@ const screens = {
   controls: $('controls-screen'),
   pause: $('pause-screen'),
   matchEnd: $('match-end-screen'),
+  career: $('career-screen'),
 };
 
 const app = {
@@ -164,6 +173,9 @@ function startMatchFlow(difficulty) {
   app.lastShots = 0;
   app.matchEndShown = false;
   app.matchEndTimer = 0;
+  // Playtime for the career record. Counted from the loop, not from wall-clock
+  // start, so a match left paused on the pause screen does not inflate it.
+  app.matchSeconds = 0;
   app.state = 'playing';
   hideAllScreens();
   app.hud.show(true);
@@ -221,14 +233,20 @@ function showMatchEnd() {
   $('match-end-title').textContent = winner === 'draw' ? 'MAÇ BERABERE' : won ? 'MAÇI KAZANDIN' : 'MAÇI KAYBETTİN';
   $('match-end-title').style.color = won ? 'var(--accent)' : 'var(--danger)';
   $('match-end-score').textContent = `${snap.teamNames.A} ${snap.scores.A} — ${snap.scores.B} ${snap.teamNames.B}`;
-  const kd = app.game.player.kills / Math.max(1, app.game.player.deaths);
+  const g = app.game;
+  const kd = g.player.kills / Math.max(1, g.player.deaths);
+  // `matchStats`, not `stats`: the latter is reset at every round start, so
+  // reading it here reported the accuracy of the final round as if it were the
+  // accuracy of the whole match.
+  const ms = g.matchStats || g.stats;
   const stats = {
-    'Zorluk': DIFFICULTY[app.game.match.difficulty].label,
-    'Elenme (öldürme)': String(app.game.player.kills),
-    'Ölüm': String(app.game.player.deaths),
+    'Zorluk': DIFFICULTY[g.match.difficulty].label,
+    'Elenme (öldürme)': String(g.player.kills),
+    'Ölüm': String(g.player.deaths),
     'K/D': kd.toFixed(2),
-    'İsabet': app.game.stats.shots ? `${Math.round((app.game.stats.hits / app.game.stats.shots) * 100)}%` : '—',
-    'Kafa isabeti': String(app.game.stats.headshots),
+    'İsabet': ms.shots ? `${Math.round((ms.hits / ms.shots) * 100)}%` : '—',
+    'Kafa isabeti': String(ms.headshots),
+    'Hasar': String(Math.round(ms.damageDealt)),
     'Toplam raund': String(snap.round),
   };
   const box = $('match-end-stats');
@@ -238,7 +256,238 @@ function showMatchEnd() {
     d.innerHTML = `<span>${k}</span><b>${v}</b>`;
     box.appendChild(d);
   }
+
+  // Fold the result into the career exactly once. `matchEndShown` already
+  // guarantees this function runs once per match, which matters: recording the
+  // same match twice would double every counter and quietly corrupt the file.
+  const roundsWon = g.player.team === 'A' ? snap.scores.A : snap.scores.B;
+  app.lastCareer = recordMatch({
+    difficulty: g.match.difficulty,
+    win: won,
+    draw: winner === 'draw',
+    kills: g.player.kills,
+    deaths: g.player.deaths,
+    shots: ms.shots,
+    hits: ms.hits,
+    headshots: ms.headshots,
+    damageDealt: ms.damageDealt,
+    rounds: snap.round,
+    roundsWon,
+    scoreA: snap.scores.A,
+    scoreB: snap.scores.B,
+    durationSeconds: app.matchSeconds || 0,
+  });
+
+  const career = careerSummary(app.lastCareer);
+  const line = $('match-end-career');
+  if (career.matches > 1) {
+    const prevAccuracy = career.accuracy;
+    line.innerHTML =
+      `Kariyer: <b>${career.matches}</b> maç · ` +
+      `galibiyet <b>${Math.round(career.winRate * 100)}%</b> · ` +
+      `K/D <b>${career.kd.toFixed(2)}</b> · ` +
+      `isabet <b>${Math.round(prevAccuracy * 100)}%</b>`;
+  } else {
+    line.textContent = 'İlk maçın — kariyerin başladı.';
+  }
   showScreen('matchEnd');
+}
+
+// ---------------------------------------------------------------- career
+/**
+ * Paint the career screen from persisted data.
+ *
+ * Everything here re-reads from storage rather than trusting an in-memory copy,
+ * so the screen is correct after a reload, after clearing, and after a match
+ * recorded in another tab.
+ */
+function renderCareerScreen() {
+  const career = loadCareer();
+  const s = careerSummary(career);
+
+  $('career-sub').textContent = s.matches
+    ? `${s.matches} maç · ${formatDuration(s.playtimeSeconds)} oynandı`
+    : 'Henüz maç yok';
+
+  // Highlights: the four numbers a player actually wants first.
+  const highlights = $('career-highlights');
+  highlights.innerHTML = '';
+  const tiles = [
+    ['GALİBİYET', s.matches ? `${Math.round(s.winRate * 100)}%` : '—'],
+    ['K/D', s.deaths ? s.kd.toFixed(2) : s.kills ? String(s.kills) : '—'],
+    ['İSABET', s.shots ? `${Math.round(s.accuracy * 100)}%` : '—'],
+    ['KAFA İSABETİ', s.hits ? `${Math.round(s.headshotRate * 100)}%` : '—'],
+  ];
+  for (const [label, value] of tiles) {
+    const d = document.createElement('div');
+    d.className = 'career-highlight';
+    d.innerHTML = `<b>${value}</b><span>${label}</span>`;
+    highlights.appendChild(d);
+  }
+
+  const stats = {
+    'Maç': String(career.matches),
+    'Galibiyet / Mağlubiyet / Berabere': `${career.wins} / ${career.losses} / ${career.draws}`,
+    'Toplam öldürme': String(career.kills),
+    'Toplam ölüm': String(career.deaths),
+    'Raund': `${career.roundsWon} / ${career.rounds}`,
+    'Toplam hasar': String(Math.round(career.damageDealt)),
+    'En iyi K/D': s.bestKd ? s.bestKd.toFixed(2) : '—',
+    'En iyi isabet': s.bestAccuracy ? `${Math.round(s.bestAccuracy * 100)}%` : '—',
+    'Oynanan süre': formatDuration(s.playtimeSeconds),
+  };
+  const statsBox = $('career-stats');
+  statsBox.innerHTML = '';
+  for (const [k, v] of Object.entries(stats)) {
+    const d = document.createElement('div');
+    d.innerHTML = `<span>${k}</span><b>${v}</b>`;
+    statsBox.appendChild(d);
+  }
+
+  // Per difficulty. Empty buckets stay on screen, greyed: seeing "ZOR: 0 maç"
+  // is the nudge that makes the difficulty setting feel like a ladder.
+  const diffBox = $('career-difficulty');
+  diffBox.innerHTML = '';
+  for (const key of ['easy', 'normal', 'hard']) {
+    const d = career.byDifficulty[key];
+    const node = document.createElement('div');
+    node.className = `career-diff${d.matches ? '' : ' empty'}`;
+    const acc = d.shots ? `${Math.round((d.hits / d.shots) * 100)}%` : '—';
+    const kd = d.deaths ? (d.kills / d.deaths).toFixed(2) : String(d.kills);
+    const wr = d.matches ? `${Math.round((d.wins / d.matches) * 100)}%` : '—';
+    node.innerHTML =
+      `<b>${DIFFICULTY[key]?.label || key}</b>` +
+      `<div class="diff-row"><span>maç</span><span>${d.matches}</span></div>` +
+      `<div class="diff-row"><span>galibiyet</span><span>${wr}</span></div>` +
+      `<div class="diff-row"><span>K/D</span><span>${kd}</span></div>` +
+      `<div class="diff-row"><span>isabet</span><span>${acc}</span></div>`;
+    diffBox.appendChild(node);
+  }
+
+  renderAccuracyTrend(accuracyTrend(career));
+
+  // History, newest first.
+  const hist = $('career-history');
+  hist.innerHTML = '';
+  if (!career.history.length) {
+    const empty = document.createElement('div');
+    empty.className = 'career-empty';
+    empty.textContent = 'Henüz kayıtlı maç yok. Bir maç bitir, burada görünsün.';
+    hist.appendChild(empty);
+  } else {
+    const head = document.createElement('div');
+    head.className = 'career-row head';
+    head.innerHTML = '<span>Tarih</span><span>Zorluk</span><span>Sonuç</span><span>K/D</span><span>İsabet</span>';
+    hist.appendChild(head);
+    for (const h of career.history) {
+      const row = document.createElement('div');
+      row.className = 'career-row';
+      let when = '—';
+      if (h.at) {
+        const date = new Date(h.at);
+        if (!Number.isNaN(date.getTime())) {
+          when = date.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
+        }
+      }
+      const result = h.draw
+        ? `<span class="drawn">Berabere ${h.scoreA}–${h.scoreB}</span>`
+        : h.win
+          ? `<span class="won">Galibiyet ${h.scoreA}–${h.scoreB}</span>`
+          : `<span class="lost">Mağlubiyet ${h.scoreA}–${h.scoreB}</span>`;
+      const acc = h.shots ? `${Math.round((h.hits / h.shots) * 100)}%` : '—';
+      // Numbers are formatted defensively: history is stored data and a
+      // hand-edited or half-written entry must render as a blank, not throw
+      // inside a loop that is drawing the whole screen.
+      const kdText = Number.isFinite(h.kd) ? h.kd.toFixed(2) : '—';
+      row.innerHTML =
+        `<span>${when}</span><span>${DIFFICULTY[h.difficulty]?.label || h.difficulty}</span>` +
+        `<span>${result}</span><span>${kdText}</span><span>${acc}</span>`;
+      hist.appendChild(row);
+    }
+  }
+
+  $('career-clear').hidden = career.matches === 0;
+}
+
+/**
+ * Accuracy sparkline.
+ *
+ * Drawn by hand rather than with a chart library: this file already ships one
+ * canvas-free UI and adding a dependency for nine points would be absurd. The
+ * y axis is pinned to 0–100% rather than auto-scaled, because an auto-scaled
+ * axis makes a 3% wobble look like a collapse.
+ */
+function renderAccuracyTrend(points) {
+  const canvas = $('career-trend-canvas');
+  const text = $('career-trend-text');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = canvas.clientWidth || 640;
+  const h = 96;
+  if (canvas.width !== Math.round(w * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  // Grid: 25 / 50 / 75 / 100.
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth = 1;
+  for (const pct of [0.25, 0.5, 0.75, 1]) {
+    const y = h - 10 - pct * (h - 26);
+    ctx.beginPath();
+    ctx.moveTo(8, y);
+    ctx.lineTo(w - 8, y);
+    ctx.stroke();
+  }
+
+  if (points.length === 0) {
+    ctx.fillStyle = 'rgba(198,214,214,0.5)';
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText('En az 20 atış yapılan maç yok', 12, h / 2);
+    text.textContent = 'Trend için en az 20 atışlık bir maça ihtiyaç var.';
+    return;
+  }
+
+  const x = (i) => (points.length === 1 ? w / 2 : 10 + (i / (points.length - 1)) * (w - 20));
+  const y = (acc) => h - 10 - acc * (h - 26);
+
+  // Area under the line, so a single point still reads as a value.
+  ctx.beginPath();
+  ctx.moveTo(x(0), h - 10);
+  for (let i = 0; i < points.length; i++) ctx.lineTo(x(i), y(points[i].accuracy));
+  ctx.lineTo(x(points.length - 1), h - 10);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(79, 209, 197, 0.12)';
+  ctx.fill();
+
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const px = x(i);
+    const py = y(points[i].accuracy);
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.strokeStyle = 'rgb(79, 209, 197)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  for (let i = 0; i < points.length; i++) {
+    ctx.beginPath();
+    ctx.arc(x(i), y(points[i].accuracy), 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgb(79, 209, 197)';
+    ctx.fill();
+  }
+
+  const first = points[0].accuracy;
+  const last = points[points.length - 1].accuracy;
+  const delta = Math.round((last - first) * 100);
+  const arrow = delta > 0 ? `+${delta}` : delta < 0 ? String(delta) : '±0';
+  text.textContent =
+    `${points.length} maç · son isabet ${Math.round(last * 100)}% ` +
+    `(${arrow} puan) · en iyi ${Math.round(Math.max(...points.map((p) => p.accuracy)) * 100)}%`;
 }
 
 // ---------------------------------------------------------------- settings
@@ -304,6 +553,32 @@ function bindUI() {
       case 'controls':
         showScreen('controls');
         break;
+      case 'career':
+        renderCareerScreen();
+        // Returning from the career screen goes back where it was opened from,
+        // which differs: the main menu before a match, the match summary after.
+        app.settingsReturn = app.state === 'ended' ? 'matchEnd' : 'menu';
+        showScreen('career');
+        break;
+      case 'career-clear':
+        // Two-step rather than a confirm() dialog: the button relabels itself,
+        // so a misclick is one more click away instead of a modal's OK button.
+        if (app.careerClearArmed) {
+          clearCareer();
+          app.careerClearArmed = false;
+          $('career-clear').textContent = 'KARİYERİ SIFIRLA';
+          renderCareerScreen();
+          showToast('Kariyer sıfırlandı', 1800);
+        } else {
+          app.careerClearArmed = true;
+          $('career-clear').textContent = 'EMİN MİSİN? TEKRAR TIKLA';
+          setTimeout(() => {
+            if (!app.careerClearArmed) return;
+            app.careerClearArmed = false;
+            $('career-clear').textContent = 'KARİYERİ SIFIRLA';
+          }, 4000);
+        }
+        break;
       case 'back':
         showScreen(app.settingsReturn || 'menu');
         break;
@@ -334,6 +609,7 @@ function bindUI() {
           app.matchEndShown = false;
           app.matchEndTimer = 0;
           app.lastShots = 0;
+          app.matchSeconds = 0;
           resumeGame();
         }
         break;
@@ -599,6 +875,10 @@ function loop(now) {
     updateGame(app.game, dt);
     afterGameUpdate(dt);
     renderGame(dt);
+    // Only count time actually spent in a live match. Counting frames while
+    // the match-end panel is open would inflate playtime by however long the
+    // player leaves the results on screen.
+    if (app.state === 'playing' && !app.game.paused) app.matchSeconds += dt;
   } else {
     renderMenuScene(dt);
   }

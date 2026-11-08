@@ -76,7 +76,13 @@ export function createGame({ difficulty = 'normal', seed = 12345, grid = null } 
     adsTarget: 0,
     fov: 78,
     shake: true,
+    // Per-round stats: reset at every round start, used by the F3 overlay.
     stats: { shots: 0, hits: 0, headshots: 0, damageDealt: 0 },
+    // Match-wide stats: never reset mid-match. The match-end screen used to
+    // read `stats` above, which meant the "accuracy" it showed was really the
+    // accuracy of the *last round only* — a silent, flattering lie whenever a
+    // player had a good final round.
+    matchStats: { shots: 0, hits: 0, headshots: 0, damageDealt: 0 },
     onSound: null,
     deathHandled: false,
     // What the player's side currently knows about enemy positions. Deliberately
@@ -269,10 +275,15 @@ export function updateGame(game, dtRaw) {
       const shots = playerTryFire(game.pc, { actors: match.actors, boxes: MAP_AABBS, rng: game.rng });
       for (const s of shots) {
         game.stats.shots += 1;
+      game.matchStats.shots += 1;
         addTracer(fx, s.origin, s.result.cast.point, s.result.cast.type);
         if (s.result.cast.type === 'actor') {
           game.stats.hits += 1;
-          if (s.result.cast.headshot) game.stats.headshots += 1;
+          game.matchStats.hits += 1;
+          if (s.result.cast.headshot) {
+            game.stats.headshots += 1;
+            game.matchStats.headshots += 1;
+          }
           const reg = registerDamage(match, game.player, s.result.cast.actor, s.result.hit);
           notifyHit(s.result.cast.actor, game.player.id, match.time);
           // Your own shot is the most reliable contact there is: you just hit
@@ -282,7 +293,10 @@ export function updateGame(game, dtRaw) {
           reportContact(game, s.result.cast.actor);
           fx.hitmarker = 0.22;
           fx.hitmarkerKill = reg.died;
-          if (s.result.hit) game.stats.damageDealt += s.result.hit.raw;
+          if (s.result.hit) {
+            game.stats.damageDealt += s.result.hit.raw;
+            game.matchStats.damageDealt += s.result.hit.raw;
+          }
           pushSound(fx, { type: s.result.hit && s.result.hit.headshot ? 'headshot' : 'hit' });
         } else if (s.result.cast.type === 'wall') {
           addImpact(fx, s.result.cast.point, s.result.cast.box);
@@ -613,6 +627,7 @@ export function gameSnapshot(game) {
       deaths: a.deaths,
     })),
     stats: { ...game.stats },
+    matchStats: { ...game.matchStats },
     fx: {
       tracers: game.fx.tracers.length,
       impacts: game.fx.impacts.length,
@@ -637,4 +652,7 @@ export function restartMatch(game, difficulty = game.match.difficulty) {
   game.pc.kickPitch = 0;
   game.coordinator.contacts = {};
   game.stats = { shots: 0, hits: 0, headshots: 0, damageDealt: 0 };
+  // A new match means new match-wide numbers. Forgetting this would make the
+  // second match of a session inherit the first match's accuracy.
+  game.matchStats = { shots: 0, hits: 0, headshots: 0, damageDealt: 0 };
 }

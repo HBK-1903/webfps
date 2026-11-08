@@ -171,6 +171,7 @@
         <nav class="menu-nav" aria-label="Ana menü seçenekleri">
           <button class="btn btn-primary" data-action="play">OYNA</button>
           <button class="btn" data-action="settings">AYARLAR</button>
+          <button class="btn" data-action="career">KARİYER</button>
           <button class="btn" data-action="controls">KONTROLLER</button>
           <button id="install-btn" class="btn btn-install" data-action="install" hidden>UYGULAMA OLARAK YÜKLE</button>
           <button class="btn" data-action="quit">ÇIKIŞ</button>
@@ -286,11 +287,45 @@
       </div>
 
       <!-- ===================== MATCH END ===================== -->
+      <!-- Career: everything you have ever done, across every match. -->
+      <div id="career-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="career-title">
+        <div class="panel panel-wide">
+          <h2 id="career-title">KARİYER</h2>
+          <p id="career-sub" class="panel-sub">Henüz maç yok</p>
+
+          <div id="career-highlights" class="career-highlights"></div>
+
+          <h3 class="career-heading">GENEL</h3>
+          <div id="career-stats" class="match-stats career-stats"></div>
+
+          <h3 class="career-heading">ZORLUĞA GÖRE</h3>
+          <div id="career-difficulty" class="career-difficulty"></div>
+
+          <h3 class="career-heading">İSABET TRENDİ</h3>
+          <div class="career-trend">
+            <canvas id="career-trend-canvas" width="640" height="96" aria-hidden="true"></canvas>
+            <p id="career-trend-text" class="career-trend-text"></p>
+          </div>
+
+          <h3 class="career-heading">SON MAÇLAR</h3>
+          <div id="career-history" class="career-history"></div>
+
+          <div class="panel-actions column">
+            <button class="btn btn-primary" data-action="back">GERİ</button>
+            <button id="career-clear" class="btn danger" data-action="career-clear">KARİYERİ SIFIRLA</button>
+          </div>
+        </div>
+      </div>
+
       <div id="match-end-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="match-end-title">
         <div class="panel">
           <h2 id="match-end-title">MAÇ BİTTİ</h2>
           <p id="match-end-score" class="panel-sub">3 - 1</p>
           <div id="match-end-stats" class="match-stats"></div>
+          <p id="match-end-career" class="match-end-career" aria-live="polite"></p>
+          <div class="panel-actions row">
+            <button class="btn" data-action="career">KARİYER</button>
+          </div>
           <div class="panel-actions column">
             <button class="btn btn-primary" data-action="rematch">YENİDEN OYNA</button>
             <button class="btn" data-action="menu">ANA MENÜ</button>
