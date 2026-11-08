@@ -15,6 +15,8 @@
     "qa": "node tools/qa.mjs",
     "matrix": "node tools/matrix.mjs",
     "a11y": "node tools/a11y.mjs --strict",
+    "visual": "node tools/visual.mjs",
+    "visual:setup": "node tools/visual-setup.mjs",
     "build:site": "node build.mjs && node tools/build-site.mjs",
     "preview:site": "node tools/serve.mjs --site",
     "icons": "node tools/make-icons.mjs",

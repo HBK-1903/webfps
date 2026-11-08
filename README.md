@@ -326,8 +326,10 @@ Oynanış sizin tarafınızda önizlemede/`dist` dosyasında doğrulanmalı.
 
 - **Final bir `.exe` yok** — Unity build ortamı bulunmadığı için. Çalıştırma yolu: `dist/SifirNokta.html`
   veya `launcher` betikleri (bir tarayıcı gerektirir; Chrome/Edge önerilir).
-- Görsel/piksel doğrulama bu ortamda yapılamadı (WebGL yok). Sahne, kamera yönleri ve HUD mantığı
-  testlerle doğrulandı; **görsel his** sizin tarafınızda kontrol edilmeli.
+- **Görsel doğrulama artık yapılabiliyor** (`npm run visual:setup` bir kez, sonra `npm run visual`): GPU yok
+  ama SwiftShader ile gerçek Chromium'da oyun açılıyor, ekran görüntüsü alınıyor ve nişangah **piksel
+  olarak** ölçülüyor (sapma: 0 px). Bkz. §10b. Ölçülemeyen: bu ortamın kare hızı ve girdi gecikmesi —
+  bunlar donanımı anlatır, oyunu değil.
 - Bot AI, şartnamedeki davranış listesinin stabil bir alt kümesidir. **Var:** haritadan türetilen siper
   noktaları (gerçek raycast ile doğrulanmış), çömelip siperden bakma/ateş etme, yaralı takım arkadaşına
   yakın destek. **Yok:** canlandırma/revive, el bombası, sesle yön tayini yapan gelişmiş işitme modeli.
@@ -496,6 +498,8 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | `npm test` | 121 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
+| `npm run visual` | Gerçek Chromium'da oyunu açar: 13 adım + nişangah/girdi ölçümü (§10b) |
+| `npm run visual:setup` | Görsel test tarayıcısını kurar (`.playwright/`, ~200 MB, tek seferlik) |
 | `npm run verify` | lint + test + a11y + build |
 | `npm run build` | Tek dosya offline build (`dist/SifirNokta.html`) |
 | `npm run build:site` | Kurulabilir site (PWA) → `dist/site/` (manifest, sw, ikonlar, `_headers`) |
@@ -508,6 +512,59 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | `npm run sim -- <zorluk> <seed> <maç>` | Headless maç simülatörü |
 
 İncelenip değerlendirilen GitHub kaynakları (ve bilinçli olarak alınmayanlar): [`docs/KAYNAKLAR.md`](docs/KAYNAKLAR.md).
+
+### 10b. Gerçek tarayıcıda görsel + hissiyat testi
+
+jsdom testleri oyunun **mantığını** doğrular ama WebGL'e hiç dokunamaz; bu yüzden "oyun gerçekten çiziyor
+mu, nişangah nerede" soruları uzun süre cevapsız kaldı. Artık cevaplanıyor:
+
+```bash
+npm run visual:setup    # tek seferlik, ~200 MB → .playwright/
+npm run visual          # 13 adım + ölçümler → screenshots/
+npm run visual -- --difficulty hard --out /tmp/zor
+npm run visual -- --json
+```
+
+**Tarayıcı neden npm'den geliyor.** Bu ortam yalnızca `registry.npmjs.org` ve `pypi.org`'a erişebiliyor.
+Playwright'ın olağan indirmesi (`cdn.playwright.dev`) ve `apt-get` ikisi de denendi ve başarısız oldu —
+`@sparticuz/chromium` ise Chromium binary'sini **npm tarball'ının içinde** taşıyor, yanında ihtiyaç
+duyduğu AL2023 `.so` setiyle. `tools/visual-setup.mjs` ikisini açar, `LD_LIBRARY_PATH`'i ayarlar ve
+kurulumun çalıştığını `chromium --version` ile doğrular (sessizce bozuk tarayıcı kurmaktan iyidir).
+
+Render: GPU yok, ama `--use-angle=swiftshader` yazılımsal **WebGL 2.0** sağlıyor.
+
+**Ölçülenler** (son koşu, 13/13):
+
+| Adım | Sonuç |
+|---|---|
+| WebGL bağlamı | WebGL 2.0, 1280×720 |
+| Menü / zorluk / HUD | açılıyor, menüler kapanıyor |
+| **Nişangah katmanı merkezde** | **sapma dx=0.00 px, dy=0.00 px** |
+| **Haç kolları simetrik** | merkez dx=0.00 px, dy=0.00 px (4 kol) |
+| Fare bakışı doğrusal | 100×1 = 10×10 = `0.038397 rad` (ivme yok) |
+| Bakış açısı sınırı | ±88° |
+| ADS eğrisi | kare kare 0.70 → 1.0 (sıçrama yok) |
+| Çömelme eğrisi | 0.45 → 1.0 (lerp çalışıyor) |
+| F3 katmanı | canlı veri (1.4 s arayla iki okuma farklı) |
+| Konsol | hata yok |
+
+Nişangah ölçümü mutasyonla sınandı: katmanı `calc(50% + 16px)`'e kaydırdığımda (orijinal hatanın
+birebir aynısı) test **dx=16px sapma** diyerek kırılıyor.
+
+**Ölçülemeyenler — ve neden.** Bu ortam 2 vCPU ve GPU'suz; oyun burada **~2 FPS** çalışıyor. Yani:
+
+- **Kare hızı** burada ölçülmez. Ölçülse bile donanımı anlatır, oyunu değil.
+- **Girdi gecikmesi** aynı sebeple anlamsız (her kare ~400 ms).
+- **Hissiyat** (kamera ivmesinin rahatsız edip etmediği, silah sallanmasının abartılı olup olmadığı)
+  hâlâ insan gerektiriyor. Ölçtüğüm şey *eğrinin doğru olduğu*, *hoş olduğu* değil.
+
+Bu ayrımı yazıyorum çünkü "test ediyorum" demek "beğeneceksin" demek değil; ikincisini iddia etmek
+dürüst olmaz.
+
+**Ortam tuhaflığı (kayda değer).** Sayfa ön plandaki pencere olmadığı için pointer lock reddediliyor ve
+oyun kendini duraklatıyor. Test, oyunun kendi durumu üzerinden duraklamayı kaldırıyor ve **sabit
+timeout yerine turun `live` fazına geçmesini bekliyor** — çünkü 2 FPS'te oyun saati duvar saatinden ~7
+kat yavaş ilerliyor. Sabit beklemeyle yazılmış bir test burada sahte hata verirdi.
 
 ## 11. Lisans / varlıklar
 

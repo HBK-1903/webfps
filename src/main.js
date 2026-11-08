@@ -913,4 +913,10 @@ if (document.readyState === 'loading') {
   boot();
 }
 
+// Exposed for the automated visual/feel tests (tools/visual.mjs): a headless
+// page has no way to reach a module-scoped `app` otherwise, and dispatching real
+// DOM events at a game it cannot inspect is not a measurement. Read-only by
+// convention; nothing in the game reads this back.
+globalThis.__SIFIR_NOKTA__ = app;
+
 export { app };

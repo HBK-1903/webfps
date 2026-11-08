@@ -10,3 +10,8 @@ dist-app/
 
 # Site build output (reproducible with `npm run build:site`)
 dist/site/
+
+# Visual-test browser (~200 MB, reproducible: npm run visual:setup)
+.playwright/
+# Visual-test output
+screenshots/

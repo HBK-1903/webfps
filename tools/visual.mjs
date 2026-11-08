@@ -1,0 +1,346 @@
+#!/usr/bin/env node
+// Real-browser test: boots the game in Chromium with software WebGL and checks
+// the things jsdom structurally cannot — that it renders, where the crosshair
+// actually lands, and whether the input/aim curves behave.
+//
+//   node tools/visual.mjs [--out DIR] [--difficulty normal] [--url URL] [--json]
+//
+// Setup once: npm run visual:setup   (see tools/visual-setup.mjs for why the
+// browser has to come from npm)
+//
+// ── What this measures, and what it does not ────────────────────────────────
+// Measurable here:      frames are produced at all; the reticle's pixel offset
+//                       from the viewport centre; mouse-look linearity; pitch
+//                       clamp; ADS and crouch transition curves; console errors.
+// NOT measurable here:  how it *feels* on real hardware. This sandbox has 2
+//                       vCPUs and no GPU, so it renders at ~2 FPS. Frame rate
+//                       and input latency measured here say nothing about a
+//                       real machine — they are hardware numbers, not game
+//                       numbers. Do not quote them as game performance.
+//
+// Known environment quirk: the page is not a foreground window, so pointer lock
+// is refused and the game pauses itself on start, and the round clock advances
+// in wall-clock slow motion (~2 FPS means 5 real seconds per game second). The
+// helper below unpauses via the game's own state and waits on phase instead of
+// on a fixed timeout.
+
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const args = process.argv.slice(2);
+const flag = (name, fallback) => {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : fallback;
+};
+
+// The UI labels the tiers in Turkish; the CLI keeps the ids used by config.js
+// and the rest of the tooling (matrix.mjs, sim.mjs).
+const DIFFICULTY_LABELS = { easy: 'KOLAY', normal: 'NORMAL', hard: 'ZOR' };
+const DIFFICULTY = flag('difficulty', 'normal');
+const OUT = path.resolve(ROOT, flag('out', 'screenshots'));
+const URL_UNDER_TEST = flag('url', `http://127.0.0.1:${process.env.PORT || 5173}/dist/SifirNokta.html`);
+const WANT_JSON = args.includes('--json');
+const VENDOR = path.join(ROOT, '.playwright');
+
+if (!DIFFICULTY_LABELS[DIFFICULTY]) {
+  console.error(`bilinmeyen zorluk "${DIFFICULTY}" — şunlardan biri: ${Object.keys(DIFFICULTY_LABELS).join(', ')}`);
+  process.exit(2);
+}
+
+const results = [];
+const errors = [];
+const measurements = {};
+
+function step(name, ok, detail) {
+  results.push({ name, ok, detail });
+  if (!WANT_JSON) console.log(`  ${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
+}
+
+function assert(cond, message) {
+  if (!cond) throw new Error(message);
+}
+
+async function main() {
+  mkdirSync(OUT, { recursive: true });
+
+  let pw;
+  let chromium;
+  try {
+    pw = (await import('playwright-core')).chromium;
+    chromium = (await import('@sparticuz/chromium')).default;
+  } catch {
+    console.error('playwright-core / @sparticuz/chromium kurulu değil.');
+    console.error('Çalıştır: npm run visual:setup');
+    process.exit(2);
+  }
+
+  // The bundled browser needs the AL2023 .so set on its search path; it is not
+  // registered with ldconfig, so it must be injected.
+  const libs = path.join(VENDOR, 'lib');
+  process.env.LD_LIBRARY_PATH = libs + (process.env.LD_LIBRARY_PATH ? ':' + process.env.LD_LIBRARY_PATH : '');
+
+  const browser = await pw.launch({
+    executablePath: await chromium.executablePath(),
+    args: chromium.args,
+    headless: true,
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+
+  // The single-file build tries to register a service worker that is not there.
+  // That 404 is expected; anything else is a real failure.
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    const t = m.text();
+    if (/404/.test(t) && /script|service/i.test(t)) return;
+    errors.push(`console: ${t}`);
+  });
+
+  if (!WANT_JSON) {
+    console.log(`\nSIFIR NOKTA — görsel + hissiyat testi`);
+    console.log(`  url: ${URL_UNDER_TEST}`);
+    console.log(`  çıktı: ${OUT}\n`);
+  }
+
+  await page.goto(URL_UNDER_TEST, { waitUntil: 'load', timeout: 60000 });
+  await page.waitForTimeout(1800);
+
+  const clickByText = (re) => page.evaluate((src) => {
+    const rx = new RegExp(src, 'i');
+    const el = [...document.querySelectorAll('button, [role="button"]')].find((b) => rx.test(b.textContent || ''));
+    if (!el) return false;
+    el.click();
+    return true;
+  }, re.source);
+
+  // ── 1. WebGL ──────────────────────────────────────────────────────────────
+  const gl = await page.evaluate(() => {
+    const c = document.querySelector('canvas');
+    if (!c) return { ok: false, why: 'canvas yok' };
+    const ctx = c.getContext('webgl2') || c.getContext('webgl');
+    if (!ctx) return { ok: false, why: 'webgl bağlamı yok' };
+    const dbg = ctx.getExtension('WEBGL_debug_renderer_info');
+    return {
+      ok: true,
+      version: ctx.getParameter(ctx.VERSION),
+      renderer: dbg ? ctx.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'bilinmiyor',
+      size: `${c.width}x${c.height}`,
+    };
+  });
+  step('WebGL bağlamı açıldı', gl.ok, gl.ok ? `${gl.version} · ${gl.size}` : gl.why);
+  measurements.webgl = gl;
+  assert(gl.ok, 'oyun WebGL bağlamı olmadan çalışamaz');
+
+  // ── 2. menu ───────────────────────────────────────────────────────────────
+  await page.screenshot({ path: path.join(OUT, '01-menu.png') });
+  const menu = await page.evaluate(() => ({
+    title: document.title,
+    build: document.getElementById('build-tag')?.textContent?.trim(),
+    screen: [...document.querySelectorAll('.screen')].find((s) => !s.classList.contains('hidden'))?.id,
+  }));
+  step('Ana menü açıldı', menu.screen === 'menu', `${menu.build}`);
+  assert(menu.screen === 'menu', 'açılışta menü beklenir');
+
+  // ── 3. difficulty ─────────────────────────────────────────────────────────
+  assert(await clickByText(/^OYNA/), 'OYNA düğmesi yok');
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: path.join(OUT, '02-difficulty.png') });
+  const diff = await page.evaluate(() =>
+    [...document.querySelectorAll('.screen')].find((s) => !s.classList.contains('hidden'))?.id);
+  step('Zorluk seçimi açıldı', diff === 'difficulty-screen', diff);
+
+  // ── 4. match starts ───────────────────────────────────────────────────────
+  assert(await clickByText(new RegExp(DIFFICULTY_LABELS[DIFFICULTY], 'i')), `${DIFFICULTY} düğmesi yok`);
+  await page.waitForTimeout(350);
+  assert(await clickByText(/MAÇI BAŞLAT/), 'MAÇI BAŞLAT düğmesi yok');
+  await page.waitForTimeout(1200);
+
+  // Pointer lock is refused in a headless page, so the game paused itself.
+  // Unpause through the game's own state, then wait on the phase — never on a
+  // fixed timeout, because a 2 FPS sandbox advances the round clock ~7x slower
+  // than wall clock.
+  await page.evaluate(() => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    if (app && app.game) app.game.paused = false;
+  });
+  await clickByText(/DEVAM/);
+
+  let phase = 'freeze';
+  for (let i = 0; i < 60; i++) {
+    await page.waitForTimeout(500);
+    phase = await page.evaluate(() => globalThis.__SIFIR_NOKTA__?.game?.match?.phase || 'none');
+    if (phase === 'live') break;
+  }
+  step('Tur LIVE oldu', phase === 'live', `${(await page.evaluate(() => globalThis.__SIFIR_NOKTA__?.game?.match?.round)) ?? '?'}. raund`);
+
+  await page.screenshot({ path: path.join(OUT, '03-ingame.png') });
+  const live = await page.evaluate(() => {
+    const c = document.querySelector('canvas');
+    return {
+      hud: !document.getElementById('hud')?.classList.contains('hidden'),
+      menus: [...document.querySelectorAll('.screen')].filter((s) => !s.classList.contains('hidden')).map((s) => s.id),
+      canvas: c ? `${c.width}x${c.height}` : null,
+    };
+  });
+  step('HUD görünür, menü kapalı', live.hud && live.menus.length === 0, live.canvas);
+
+  // ── 5. crosshair geometry ─────────────────────────────────────────────────
+  // This answers the original complaint ("the crosshair is not where I shoot")
+  // with numbers. Two independent checks:
+  //   a) the reticle layer sits exactly at the viewport centre, and
+  //   b) the four arms are symmetric about it — an off-centre arm would mean
+  //      the drawn crosshair's own centre disagrees with its container.
+  const reticle = await page.evaluate(() => {
+    const layer = document.querySelector('.reticle-layer');
+    if (!layer) return { error: '.reticle-layer yok' };
+    const box = layer.getBoundingClientRect();
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const arms = [...layer.querySelectorAll('.ch')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        cls: el.className,
+        centerX: r.left + r.width / 2,
+        centerY: r.top + r.height / 2,
+      };
+    });
+    // The crosshair's own origin: the arm offsets are symmetric around it, so
+    // take the midpoint of opposite arms.
+    const top = arms.find((a) => a.cls.includes('ch-top'));
+    const bottom = arms.find((a) => a.cls.includes('ch-bottom'));
+    const left = arms.find((a) => a.cls.includes('ch-left'));
+    const right = arms.find((a) => a.cls.includes('ch-right'));
+    const origin = {
+      x: top && bottom ? (top.centerX + bottom.centerX) / 2 : null,
+      y: left && right ? (left.centerY + right.centerY) / 2 : null,
+    };
+    // Vertical origin comes from the top/bottom arms, horizontal from left/right.
+    const originY = top && bottom ? (top.centerY + bottom.centerY) / 2 : null;
+    return {
+      viewport: { w: window.innerWidth, h: window.innerHeight, cx, cy },
+      layer: { x: box.left, y: box.top },
+      armCount: arms.length,
+      armOrigin: { x: left && right ? (left.centerX + right.centerX) / 2 : null, y: originY },
+      layerOffset: { dx: +(box.left - cx).toFixed(2), dy: +(box.top - cy).toFixed(2) },
+      voidOrigin: origin.x === null ? null : { x: +origin.x.toFixed(2), y: origin.y === null ? null : +origin.y.toFixed(2) },
+    };
+  });
+
+  if (reticle.error) {
+    step('Nişangah merkezde', false, reticle.error);
+  } else {
+    const d = reticle.layerOffset;
+    const centred = Math.abs(d.dx) <= 0.5 && Math.abs(d.dy) <= 0.5;
+    step('Nişangah katmanı merkezde', centred, `sapma dx=${d.dx}px dy=${d.dy}px`);
+    measurements.reticle = reticle;
+
+    // The drawn crosshair's own centre must agree with the layer it lives in.
+    const armDx = reticle.armOrigin.x === null ? null : +(reticle.armOrigin.x - reticle.viewport.cx).toFixed(2);
+    const armDy = reticle.armOrigin.y === null ? null : +(reticle.armOrigin.y - reticle.viewport.cy).toFixed(2);
+    const armsCentred = armDx !== null && armDy !== null && Math.abs(armDx) <= 0.5 && Math.abs(armDy) <= 0.5;
+    step('Haç kolları simetrik', armsCentred, `merkez dx=${armDx}px dy=${armDy}px · ${reticle.armCount} kol`);
+    if (!centred || !armsCentred) {
+      await page.screenshot({ path: path.join(OUT, '05-reticle-offset.png') });
+    }
+  }
+
+  // ── 6. input and transition curves ────────────────────────────────────────
+  const feel = await page.evaluate(async () => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    if (!app || !app.game) return { error: 'window.__SIFIR_NOKTA__ yok' };
+    const g = app.game;
+    const canvas = document.querySelector('canvas');
+    const fire = (dx, dy) => canvas.dispatchEvent(new MouseEvent('mousemove', { movementX: dx, movementY: dy, bubbles: true }));
+    const frame = () => new Promise((r) => requestAnimationFrame(r));
+
+    // Mouse-look linearity: the same total movement, split differently, must
+    // turn the camera by the same angle. A curve or an acceleration would make
+    // 10x10 differ from 100x1.
+    const y0 = g.pc.yaw;
+    fire(100, 0); await frame();
+    const one = g.pc.yaw - y0;
+    const y1 = g.pc.yaw;
+    for (let i = 0; i < 10; i++) fire(10, 0);
+    await frame();
+    const ten = g.pc.yaw - y1;
+
+    // Pitch clamp.
+    for (let i = 0; i < 200; i++) fire(0, 100);
+    await frame();
+    const pitchUp = +(g.pc.pitch * 180 / Math.PI).toFixed(1);
+    for (let i = 0; i < 400; i++) fire(0, -100);
+    await frame();
+    const pitchDown = +(g.pc.pitch * 180 / Math.PI).toFixed(1);
+
+    // ADS curve: must ramp rather than snap.
+    g.input.ads = true; g.pc.ads = true;
+    const ads = [];
+    for (let i = 0; i < 20; i++) { await frame(); ads.push(+g.pc.adsBlend.toFixed(3)); }
+    g.input.ads = false; g.pc.ads = false;
+
+    return {
+      look: { oneBy100: +one.toFixed(6), tenBy10: +ten.toFixed(6), linear: Math.abs(one - ten) < 1e-4 },
+      pitchClampDeg: { up: pitchUp, down: pitchDown },
+      adsCurve: ads,
+      fov: g.fov,
+    };
+  });
+
+  if (feel.error) {
+    step('Girdi eğrileri ölçüldü', false, feel.error);
+  } else {
+    step('Fare bakışı doğrusal', feel.look.linear,
+      `100×1 = ${feel.look.oneBy100} rad, 10×10 = ${feel.look.tenBy10} rad`);
+    const clamped = Math.abs(feel.pitchClampDeg.up) <= 89.5 && Math.abs(feel.pitchClampDeg.down) <= 89.5;
+    step('Bakış açısı sınırlı', clamped, `${feel.pitchClampDeg.up}° / ${feel.pitchClampDeg.down}°`);
+    const ramps = feel.adsCurve.some((v) => v > 0.05 && v < 0.95);
+    step('ADS eğrisi sıçramıyor', ramps, `ilk kare ${feel.adsCurve[0]}, son ${feel.adsCurve[feel.adsCurve.length - 1]}`);
+    measurements.feel = feel;
+  }
+
+  // ── 7. crouch transition (real key events, so the game's own input path runs)
+  await page.keyboard.down('ControlLeft');
+  const crouch = [];
+  for (let i = 0; i < 10; i++) {
+    await page.waitForTimeout(140);
+    crouch.push(await page.evaluate(() => +(globalThis.__SIFIR_NOKTA__?.game?.player?.crouch ?? -1).toFixed(3)));
+  }
+  await page.keyboard.up('ControlLeft');
+  const crouched = crouch.some((v) => v > 0.9);
+  step('Çömelme çalışıyor', crouched, `eğri ${crouch[0]} → ${crouch[crouch.length - 1]}`);
+  measurements.crouchCurve = crouch;
+
+  // ── 8. F3 overlay shows live simulation data ──────────────────────────────
+  await page.keyboard.press('F3');
+  await page.waitForTimeout(700);
+  const dbg1 = await page.evaluate(() => document.getElementById('debug-overlay')?.textContent || '');
+  await page.waitForTimeout(1400);
+  const dbg2 = await page.evaluate(() => document.getElementById('debug-overlay')?.textContent || '');
+  await page.screenshot({ path: path.join(OUT, '04-debug-overlay.png') });
+  step('F3 katmanı canlı', dbg1.length > 0 && dbg1 !== dbg2, dbg1 ? `${dbg1.split('\n').length} satır` : 'boş');
+  if (dbg1) writeFileSync(path.join(OUT, 'debug-overlay.txt'), `${dbg1}\n\n--- 1.4s sonra ---\n\n${dbg2}`, 'utf8');
+
+  // ── 9. console ────────────────────────────────────────────────────────────
+  step('Konsol hatası yok', errors.length === 0, errors.length ? errors.slice(0, 2).join(' | ') : 'temiz');
+
+  await browser.close();
+
+  if (WANT_JSON) {
+    console.log(JSON.stringify({ results, measurements, errors }, null, 2));
+  } else {
+    const failed = results.filter((r) => !r.ok);
+    console.log(`\n  ${results.length - failed.length}/${results.length} adım geçti → ${path.relative(ROOT, OUT)}/\n`);
+    if (measurements.feel) {
+      console.log('  Not: bu ortamda ~2 FPS (2 vCPU, GPU yok). Kare hızı ve girdi gecikmesi');
+      console.log('  burada ölçülmez — ölçülse de donanımı anlatır, oyunu değil.\n');
+    }
+  }
+  if (results.some((r) => !r.ok)) process.exit(1);
+}
+
+main().catch((err) => {
+  console.error('\nGörsel test başarısız:', err.message, '\n');
+  process.exit(1);
+});
