@@ -93,9 +93,3 @@ export function syncFx(fx, fxState) {
   iMesh.material.opacity = 0.85;
 }
 
-export function disposeFx(fx) {
-  fx.tracers.geometry.dispose();
-  fx.tracers.material.dispose();
-  fx.impacts.geometry.dispose();
-  fx.impacts.material.dispose();
-}

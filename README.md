@@ -86,7 +86,7 @@ Kod imzalama sertifikası olmadığı için Windows ilk çalıştırmada SmartSc
 
 ### Testler ve kalite kapısı
 ```bash
-npm test             # 118 test, tamamı headless (Node + jsdom)
+npm test             # 119 test, tamamı headless (Node + jsdom)
 npm run lint         # ESLint (gerçek hata odaklı kural seti)
 npm run verify       # lint + test + build — tek komutta tam doğrulama
 npm run qa           # scripted playtest → docs/QA-REPORT.md
@@ -227,7 +227,7 @@ src/
     scene.js  actorRigs.js  viewmodel.js  fx.js
   ui/                   # HUD, ses, ayarlar (localStorage)
   main.js               # uygulama kabuğu: menü akışı, input, pointer lock, render döngüsü
-tests/                  # 118 test (core, AI, nişan, HUD, PWA, e2e app boot)
+tests/                  # 119 test (core, AI, nişan, HUD, PWA, e2e app boot)
 tools/serve.mjs         # dev sunucusu
 tools/sim.mjs           # headless maç simülatörü
 build.mjs               # tek dosya offline build
@@ -240,7 +240,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 
 ## 5. Test raporu
 
-`npm test` → **118/118 geçti** (Node 22 + jsdom, headless):
+`npm test` → **119/119 geçti** (Node 22 + jsdom, headless):
 
 | Dosya | Kapsam |
 |---|---|
@@ -250,7 +250,7 @@ bot davranışı ve zorluk farkı tarayıcı olmadan da ölçülebiliyor (`npm t
 | `tests/nav.test.js` (11) | Yürünebilirlik, spawn simetrisi ve güvenliği, A* erişilebilirliği, tünelleme yok, LOS, ray-cast |
 | `tests/ai.test.js` (22) | Duvar arkasını görmeme, FOV konisi, zorluk farkı (ölçülmüş tepki/isabet), son bilinen konum, işitme gürültüsü, boş şarjörle ateş etmeme, harita dışına çıkmama, yığılmama, lane yürüyüşü (spawn'da kilitlenmeme), sessiz raundun çözülmesi (tıkanma bütçesi), tohumlu maç tekrarlanabilirliği (determinizm), takım arkadaşıyla ayrışma, siper noktalarının simetrisi + gerçekten saklaması, yaralı botun sipere gidip çömelmesi, siperin tek taraflı olması, yardım çağrısı ve **düşman konumu sızdırmaması** |
 | `tests/packaging.test.js` (7) | Electron config'i (appId, hedefler, dosya listesi) parse edilip doğrulanır; renderer güvenliği (`contextIsolation`/`sandbox`/`nodeIntegration`), in-game çıkış köprüsü, PWA manifest + maskable ikon, service worker sürümleme/temizlik ve `file://`'de sessizce devre dışı kalma |
-| `tests/aim.test.js` (15) | Nişangahın tam ekran merkezinde olması, ADS'in gerçekten kamera eksenine oturması, kafa/gövde hacimlerinin kesişmemesi, botların gövdeye nişan alıp zorlukla yükselmesi, geri tepmenin seri boyunca birikmesi, çömelirken nişan noktasının sıçramaması, ADS isabet bonusunun arpacıkla aynı eğride gelmesi, şeritlerin `ROUTES` geometrisine göre gerçekten dönmüş eşleşmesi ve slotun `actor.index` değil `spawnZ` olması |
+| `tests/aim.test.js` (16) | Nişangahın tam ekran merkezinde olması, ADS'in gerçekten kamera eksenine oturması, kafa/gövde hacimlerinin kesişmemesi, botların gövdeye nişan alıp zorlukla yükselmesi, geri tepmenin seri boyunca birikmesi, çömelirken nişan noktasının sıçramaması, ADS isabet bonusunun arpacıkla aynı eğride gelmesi, vuruş hacimlerinin ilan edilen boya tam oturması, şeritlerin `ROUTES` geometrisine göre gerçekten dönmüş eşleşmesi ve slotun `actor.index` değil `spawnZ` olması |
 | `tests/integration.test.js` (11) | 3 zorlukta tam maç bitişi, geri sayımda hasar/ateş kilidi, ölüyken ateş, dost ateşi, kafa isabeti, duraklatma dondurması, restart temizliği, HUD durumu, hassasiyet etkisi |
 | `tests/ui.test.js` (5) | Gerçek HTML + gerçek HUD bağlaması, reload/boş şarjör, raund sonucu, ayar doğrulama/kalıcılık, tüm kontrol ID'leri |
 | `tests/integration.test.js` (14) | + canlı zorluk değişimi, paylaşılan nav grid, `gameSnapshot` sözleşmesi |
@@ -479,7 +479,7 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 118 headless test |
+| `npm test` | 119 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
 | `npm run verify` | lint + test + a11y + build |

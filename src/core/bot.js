@@ -1185,26 +1185,7 @@ export function notifyHit(actor, attackerId, time) {
   actor.lastAttackerId = attackerId;
 }
 
-/** Bot weapon ammo snapshot for HUD/debug. */
-export function botAmmo(bot) {
-  const w = activeWeapon(bot.loadout);
-  return { mag: w.mag, reserve: w.reserve, name: w.def.shortName, reloading: w.reloading };
-}
 
-/** Debug: where a bot thinks the threat is. */
-export function botDebug(bot) {
-  const b = bot.brain;
-  return {
-    state: b.state,
-    lane: b.lane,
-    targetId: b.target ? b.target.id : 0,
-    visible: b.targetVisible,
-    lastSeen: b.lastSeen,
-    shots: b.shots,
-    hits: b.hits,
-    status: b.statusText,
-  };
-}
 
 export { hitVolumes, bodyRadius, castShot, MATCH };
 

@@ -184,37 +184,6 @@ export function getCoverPoints(grid = null) {
   return out;
 }
 
-/**
- * Best cover spot near (x,z) that hides a crouched bot from `threat` and is
- * within `maxDist` of the search centre. Returns null when nothing qualifies —
- * callers must treat that as "no cover available", never as "stay put".
- */
-export function findCoverNear(points, x, z, threat, { maxDist = 12 } = {}) {
-  if (!points || !points.length || !threat) return null;
-  let best = null;
-  let bestScore = Infinity;
-  for (const p of points) {
-    const d = Math.hypot(p.x - x, p.z - z);
-    if (d > maxDist) continue;
-    const toThreat = Math.hypot(threat.x - p.x, threat.z - p.z);
-    if (toThreat > MAX_COVER_RANGE) continue;
-    // The spot must sit on the far side of its box from the threat.
-    const facing = ((threat.x - p.x) * p.faceX + (threat.z - p.z) * p.faceZ) / (toThreat || 1);
-    if (facing < 0.35) continue;
-    const score = d + (1 - p.quality) * 6 + Math.abs(toThreat - 14) * 0.12;
-    // Mirrored situations produce exactly equal scores, and on this 180°-mirrored
-    // map that happens constantly (the two teams are reflections of each other).
-    // Breaking those ties by list order silently favours one side, so the tie-break
-    // is symmetric: prefer the point on our own half of the map.
-    const sameSide = (p.x >= 0) === (x >= 0);
-    const tie = sameSide ? 0 : 1e-6;
-    if (score + tie < bestScore) {
-      bestScore = score + tie;
-      best = p;
-    }
-  }
-  return best;
-}
 
 /** Cover spot that keeps the bot's current enemy in view but gives protection. */
 export function pickCoverFor(bot, points, threat) {

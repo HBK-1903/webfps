@@ -15,7 +15,7 @@ import { laneForMirroredSlot, mirrorSlot, LANE_PATTERN, ROUTES, SPAWNS, ROTATE_L
 import { createGame } from '../src/core/game.js';
 import { aimPoint, laneSlot } from '../src/core/bot.js';
 import { updatePlayer } from '../src/core/player.js';
-import { DIFFICULTY } from '../src/core/config.js';
+import { DIFFICULTY, PLAYER } from '../src/core/config.js';
 import { castShot, directionFromAngles, anglesTo } from '../src/core/combat.js';
 import { createViewModel, applyPose, setViewModelWeapon } from '../src/render/viewmodel.js';
 import { applyCameraAngles } from '../src/render/math.js';
@@ -361,6 +361,45 @@ test('a bot derives its slot from its spawn position, not from its actor index',
     assert.deepEqual(taken, [0, 1, 2, 3, 4], `${team} does not fill every spawn slot: ${taken}`);
   }
   void lanesA; void lanesB;
+});
+
+test('the hit volumes add up to the declared actor height', () => {
+  // The head sphere currently tops out at exactly PLAYER.height (1.80m) — but
+  // nothing said so, and nothing kept it true. PLAYER.height/eyeHeight drive the
+  // render rig; the hitbox reads eyeHeight and hard-codes the head radius, so
+  // changing the actor height would silently leave a head floating above the
+  // body or a body poking through it. Pin the relationship instead.
+  const a = createActor({ team: 'A', name: 'test', index: 0 });
+  a.crouch = 0;
+  const hv = hitVolumes(a);
+  const headTop = hv.head.y + hv.head.r;
+  assert.ok(Math.abs(headTop - PLAYER.height) < 1e-6,
+    `head tops out at ${headTop.toFixed(3)}m but the actor is ${PLAYER.height}m tall`);
+
+  // Only the standing crown is tied to PLAYER.height. A crouched actor's head is
+  // a *fixed-size* sphere that follows the lowered eye line — deriving the radius
+  // from the height instead would grow it to 77cm when crouched, because the
+  // crouched eye drops to 1.05m. Keep the radius constant across the crouch.
+  for (const crouch of [0.5, 1]) {
+    const c = createActor({ team: 'A', name: 'test', index: 0 });
+    c.crouch = crouch;
+    const chv = hitVolumes(c);
+    assert.ok(Math.abs(chv.head.r - hv.head.r) < 1e-9,
+      `head radius changes with crouch (${hv.head.r} -> ${chv.head.r}); a head is not a balloon`);
+    assert.ok(chv.head.y + chv.head.r < PLAYER.height,
+      `a crouched actor's crown (${(chv.head.y + chv.head.r).toFixed(2)}m) is above the standing height`);
+    assert.ok(Math.abs((chv.head.y - chv.head.r) - chv.body.maxY) < 1e-9,
+      'crouched head and torso overlap or leave a gap');
+  }
+  // Head sits on the shoulders: no overlap (free headshots) and no gap (shots
+  // that pass through with no hit volume at all).
+  const headBottom = hv.head.y - hv.head.r;
+  assert.ok(Math.abs(headBottom - hv.body.maxY) < 1e-6,
+    `head bottom ${headBottom.toFixed(3)} and body top ${hv.body.maxY.toFixed(3)} disagree`);
+  // The head must be centred on eye level, or a shot at the eyes misses the head.
+  assert.ok(Math.abs(hv.head.y - eyePoint(a).y) < 0.05, 'the head is not centred on the eye line');
+  // And the torso must start above the feet.
+  assert.ok(hv.body.minY > 0 && hv.body.minY < 0.4, `body starts at ${hv.body.minY}m, not near the legs`);
 });
 
 test('the ADS accuracy bonus follows the sight instead of snapping on', () => {

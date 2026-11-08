@@ -95,9 +95,6 @@ export function canFire(w) {
   return !w.reloading && !w.switching && w.cooldown <= 0 && w.mag > 0;
 }
 
-export function needsReload(w) {
-  return w.mag <= 0 && w.reserve > 0;
-}
 
 export function startReload(w) {
   if (w.reloading || w.switching) return false;
@@ -200,9 +197,6 @@ export function ammoInfo(loadout) {
 
 export function degToRad(d) {
   return (d * Math.PI) / 180;
-}
-export function radToDeg(r) {
-  return (r * 180) / Math.PI;
 }
 export function clampPitch(p) {
   const lim = degToRad(89);
