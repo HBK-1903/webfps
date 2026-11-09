@@ -4,6 +4,14 @@
 
 import { GAME_TITLE, GAME_VERSION, WEAPONS, DIFFICULTY } from './core/config.js';
 import {
+  loadCareer,
+  recordMatch,
+  clearCareer,
+  careerSummary,
+  accuracyTrend,
+  formatDuration,
+} from './core/career.js';
+import {
   createGame,
   updateGame,
   hudState,
@@ -16,6 +24,9 @@ import {
   playerToggleAds,
   drainSounds,
   gameSnapshot,
+  cycleSpectateTarget,
+  possessTeammate,
+  spectateCamera,
 } from './core/game.js';
 import { eyePoint } from './core/actor.js';
 import { createScene, resizeScene, applyQuality } from './render/scene.js';
@@ -31,7 +42,7 @@ import {
 import { createFx, syncFx } from './render/fx.js';
 import { applyCameraAngles } from './render/math.js';
 import { createHud } from './ui/hud.js';
-import { createAudio } from './ui/audio.js';
+import { createAudio, soundPlacement } from './ui/audio.js';
 import { loadSettings, saveSettings, sanitize } from './ui/settings.js';
 import GUI from 'lil-gui';
 import { WEAPONS as TUNING_WEAPONS, DIFFICULTY as TUNING_DIFFICULTY, PLAYER as TUNING_PLAYER, COMBAT as TUNING_COMBAT } from './core/config.js';
@@ -48,6 +59,7 @@ const screens = {
   controls: $('controls-screen'),
   pause: $('pause-screen'),
   matchEnd: $('match-end-screen'),
+  career: $('career-screen'),
 };
 
 const app = {
@@ -154,6 +166,10 @@ function startMatchFlow(difficulty) {
 
   disposeGame();
   app.game = createGame({ difficulty, seed: (Math.random() * 1e9) | 0 });
+  // Settings are applied once at boot, before any game exists, so `applySettings`
+  // skips every game-scoped option (`if (app.game)`). Without this line a saved
+  // "screen shake off" was silently ignored and came back on at the first match.
+  app.game.shake = app.settings.shake;
   app.rigs.clear();
   for (const actor of app.game.match.actors) {
     if (actor.isPlayer) continue;
@@ -164,6 +180,9 @@ function startMatchFlow(difficulty) {
   app.lastShots = 0;
   app.matchEndShown = false;
   app.matchEndTimer = 0;
+  // Playtime for the career record. Counted from the loop, not from wall-clock
+  // start, so a match left paused on the pause screen does not inflate it.
+  app.matchSeconds = 0;
   app.state = 'playing';
   hideAllScreens();
   app.hud.show(true);
@@ -221,14 +240,20 @@ function showMatchEnd() {
   $('match-end-title').textContent = winner === 'draw' ? 'MAÇ BERABERE' : won ? 'MAÇI KAZANDIN' : 'MAÇI KAYBETTİN';
   $('match-end-title').style.color = won ? 'var(--accent)' : 'var(--danger)';
   $('match-end-score').textContent = `${snap.teamNames.A} ${snap.scores.A} — ${snap.scores.B} ${snap.teamNames.B}`;
-  const kd = app.game.player.kills / Math.max(1, app.game.player.deaths);
+  const g = app.game;
+  const kd = g.player.kills / Math.max(1, g.player.deaths);
+  // `matchStats`, not `stats`: the latter is reset at every round start, so
+  // reading it here reported the accuracy of the final round as if it were the
+  // accuracy of the whole match.
+  const ms = g.matchStats || g.stats;
   const stats = {
-    'Zorluk': DIFFICULTY[app.game.match.difficulty].label,
-    'Elenme (öldürme)': String(app.game.player.kills),
-    'Ölüm': String(app.game.player.deaths),
+    'Zorluk': DIFFICULTY[g.match.difficulty].label,
+    'Elenme (öldürme)': String(g.player.kills),
+    'Ölüm': String(g.player.deaths),
     'K/D': kd.toFixed(2),
-    'İsabet': app.game.stats.shots ? `${Math.round((app.game.stats.hits / app.game.stats.shots) * 100)}%` : '—',
-    'Kafa isabeti': String(app.game.stats.headshots),
+    'İsabet': ms.shots ? `${Math.round((ms.hits / ms.shots) * 100)}%` : '—',
+    'Kafa isabeti': String(ms.headshots),
+    'Hasar': String(Math.round(ms.damageDealt)),
     'Toplam raund': String(snap.round),
   };
   const box = $('match-end-stats');
@@ -238,7 +263,238 @@ function showMatchEnd() {
     d.innerHTML = `<span>${k}</span><b>${v}</b>`;
     box.appendChild(d);
   }
+
+  // Fold the result into the career exactly once. `matchEndShown` already
+  // guarantees this function runs once per match, which matters: recording the
+  // same match twice would double every counter and quietly corrupt the file.
+  const roundsWon = g.player.team === 'A' ? snap.scores.A : snap.scores.B;
+  app.lastCareer = recordMatch({
+    difficulty: g.match.difficulty,
+    win: won,
+    draw: winner === 'draw',
+    kills: g.player.kills,
+    deaths: g.player.deaths,
+    shots: ms.shots,
+    hits: ms.hits,
+    headshots: ms.headshots,
+    damageDealt: ms.damageDealt,
+    rounds: snap.round,
+    roundsWon,
+    scoreA: snap.scores.A,
+    scoreB: snap.scores.B,
+    durationSeconds: app.matchSeconds || 0,
+  });
+
+  const career = careerSummary(app.lastCareer);
+  const line = $('match-end-career');
+  if (career.matches > 1) {
+    const prevAccuracy = career.accuracy;
+    line.innerHTML =
+      `Kariyer: <b>${career.matches}</b> maç · ` +
+      `galibiyet <b>${Math.round(career.winRate * 100)}%</b> · ` +
+      `K/D <b>${career.kd.toFixed(2)}</b> · ` +
+      `isabet <b>${Math.round(prevAccuracy * 100)}%</b>`;
+  } else {
+    line.textContent = 'İlk maçın — kariyerin başladı.';
+  }
   showScreen('matchEnd');
+}
+
+// ---------------------------------------------------------------- career
+/**
+ * Paint the career screen from persisted data.
+ *
+ * Everything here re-reads from storage rather than trusting an in-memory copy,
+ * so the screen is correct after a reload, after clearing, and after a match
+ * recorded in another tab.
+ */
+function renderCareerScreen() {
+  const career = loadCareer();
+  const s = careerSummary(career);
+
+  $('career-sub').textContent = s.matches
+    ? `${s.matches} maç · ${formatDuration(s.playtimeSeconds)} oynandı`
+    : 'Henüz maç yok';
+
+  // Highlights: the four numbers a player actually wants first.
+  const highlights = $('career-highlights');
+  highlights.innerHTML = '';
+  const tiles = [
+    ['GALİBİYET', s.matches ? `${Math.round(s.winRate * 100)}%` : '—'],
+    ['K/D', s.deaths ? s.kd.toFixed(2) : s.kills ? String(s.kills) : '—'],
+    ['İSABET', s.shots ? `${Math.round(s.accuracy * 100)}%` : '—'],
+    ['KAFA İSABETİ', s.hits ? `${Math.round(s.headshotRate * 100)}%` : '—'],
+  ];
+  for (const [label, value] of tiles) {
+    const d = document.createElement('div');
+    d.className = 'career-highlight';
+    d.innerHTML = `<b>${value}</b><span>${label}</span>`;
+    highlights.appendChild(d);
+  }
+
+  const stats = {
+    'Maç': String(career.matches),
+    'Galibiyet / Mağlubiyet / Berabere': `${career.wins} / ${career.losses} / ${career.draws}`,
+    'Toplam öldürme': String(career.kills),
+    'Toplam ölüm': String(career.deaths),
+    'Raund': `${career.roundsWon} / ${career.rounds}`,
+    'Toplam hasar': String(Math.round(career.damageDealt)),
+    'En iyi K/D': s.bestKd ? s.bestKd.toFixed(2) : '—',
+    'En iyi isabet': s.bestAccuracy ? `${Math.round(s.bestAccuracy * 100)}%` : '—',
+    'Oynanan süre': formatDuration(s.playtimeSeconds),
+  };
+  const statsBox = $('career-stats');
+  statsBox.innerHTML = '';
+  for (const [k, v] of Object.entries(stats)) {
+    const d = document.createElement('div');
+    d.innerHTML = `<span>${k}</span><b>${v}</b>`;
+    statsBox.appendChild(d);
+  }
+
+  // Per difficulty. Empty buckets stay on screen, greyed: seeing "ZOR: 0 maç"
+  // is the nudge that makes the difficulty setting feel like a ladder.
+  const diffBox = $('career-difficulty');
+  diffBox.innerHTML = '';
+  for (const key of ['easy', 'normal', 'hard']) {
+    const d = career.byDifficulty[key];
+    const node = document.createElement('div');
+    node.className = `career-diff${d.matches ? '' : ' empty'}`;
+    const acc = d.shots ? `${Math.round((d.hits / d.shots) * 100)}%` : '—';
+    const kd = d.deaths ? (d.kills / d.deaths).toFixed(2) : String(d.kills);
+    const wr = d.matches ? `${Math.round((d.wins / d.matches) * 100)}%` : '—';
+    node.innerHTML =
+      `<b>${DIFFICULTY[key]?.label || key}</b>` +
+      `<div class="diff-row"><span>maç</span><span>${d.matches}</span></div>` +
+      `<div class="diff-row"><span>galibiyet</span><span>${wr}</span></div>` +
+      `<div class="diff-row"><span>K/D</span><span>${kd}</span></div>` +
+      `<div class="diff-row"><span>isabet</span><span>${acc}</span></div>`;
+    diffBox.appendChild(node);
+  }
+
+  renderAccuracyTrend(accuracyTrend(career));
+
+  // History, newest first.
+  const hist = $('career-history');
+  hist.innerHTML = '';
+  if (!career.history.length) {
+    const empty = document.createElement('div');
+    empty.className = 'career-empty';
+    empty.textContent = 'Henüz kayıtlı maç yok. Bir maç bitir, burada görünsün.';
+    hist.appendChild(empty);
+  } else {
+    const head = document.createElement('div');
+    head.className = 'career-row head';
+    head.innerHTML = '<span>Tarih</span><span>Zorluk</span><span>Sonuç</span><span>K/D</span><span>İsabet</span>';
+    hist.appendChild(head);
+    for (const h of career.history) {
+      const row = document.createElement('div');
+      row.className = 'career-row';
+      let when = '—';
+      if (h.at) {
+        const date = new Date(h.at);
+        if (!Number.isNaN(date.getTime())) {
+          when = date.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
+        }
+      }
+      const result = h.draw
+        ? `<span class="drawn">Berabere ${h.scoreA}–${h.scoreB}</span>`
+        : h.win
+          ? `<span class="won">Galibiyet ${h.scoreA}–${h.scoreB}</span>`
+          : `<span class="lost">Mağlubiyet ${h.scoreA}–${h.scoreB}</span>`;
+      const acc = h.shots ? `${Math.round((h.hits / h.shots) * 100)}%` : '—';
+      // Numbers are formatted defensively: history is stored data and a
+      // hand-edited or half-written entry must render as a blank, not throw
+      // inside a loop that is drawing the whole screen.
+      const kdText = Number.isFinite(h.kd) ? h.kd.toFixed(2) : '—';
+      row.innerHTML =
+        `<span>${when}</span><span>${DIFFICULTY[h.difficulty]?.label || h.difficulty}</span>` +
+        `<span>${result}</span><span>${kdText}</span><span>${acc}</span>`;
+      hist.appendChild(row);
+    }
+  }
+
+  $('career-clear').hidden = career.matches === 0;
+}
+
+/**
+ * Accuracy sparkline.
+ *
+ * Drawn by hand rather than with a chart library: this file already ships one
+ * canvas-free UI and adding a dependency for nine points would be absurd. The
+ * y axis is pinned to 0–100% rather than auto-scaled, because an auto-scaled
+ * axis makes a 3% wobble look like a collapse.
+ */
+function renderAccuracyTrend(points) {
+  const canvas = $('career-trend-canvas');
+  const text = $('career-trend-text');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = canvas.clientWidth || 640;
+  const h = 96;
+  if (canvas.width !== Math.round(w * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  // Grid: 25 / 50 / 75 / 100.
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth = 1;
+  for (const pct of [0.25, 0.5, 0.75, 1]) {
+    const y = h - 10 - pct * (h - 26);
+    ctx.beginPath();
+    ctx.moveTo(8, y);
+    ctx.lineTo(w - 8, y);
+    ctx.stroke();
+  }
+
+  if (points.length === 0) {
+    ctx.fillStyle = 'rgba(198,214,214,0.5)';
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText('En az 20 atış yapılan maç yok', 12, h / 2);
+    text.textContent = 'Trend için en az 20 atışlık bir maça ihtiyaç var.';
+    return;
+  }
+
+  const x = (i) => (points.length === 1 ? w / 2 : 10 + (i / (points.length - 1)) * (w - 20));
+  const y = (acc) => h - 10 - acc * (h - 26);
+
+  // Area under the line, so a single point still reads as a value.
+  ctx.beginPath();
+  ctx.moveTo(x(0), h - 10);
+  for (let i = 0; i < points.length; i++) ctx.lineTo(x(i), y(points[i].accuracy));
+  ctx.lineTo(x(points.length - 1), h - 10);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(79, 209, 197, 0.12)';
+  ctx.fill();
+
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const px = x(i);
+    const py = y(points[i].accuracy);
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.strokeStyle = 'rgb(79, 209, 197)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  for (let i = 0; i < points.length; i++) {
+    ctx.beginPath();
+    ctx.arc(x(i), y(points[i].accuracy), 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgb(79, 209, 197)';
+    ctx.fill();
+  }
+
+  const first = points[0].accuracy;
+  const last = points[points.length - 1].accuracy;
+  const delta = Math.round((last - first) * 100);
+  const arrow = delta > 0 ? `+${delta}` : delta < 0 ? String(delta) : '±0';
+  text.textContent =
+    `${points.length} maç · son isabet ${Math.round(last * 100)}% ` +
+    `(${arrow} puan) · en iyi ${Math.round(Math.max(...points.map((p) => p.accuracy)) * 100)}%`;
 }
 
 // ---------------------------------------------------------------- settings
@@ -304,6 +560,32 @@ function bindUI() {
       case 'controls':
         showScreen('controls');
         break;
+      case 'career':
+        renderCareerScreen();
+        // Returning from the career screen goes back where it was opened from,
+        // which differs: the main menu before a match, the match summary after.
+        app.settingsReturn = app.state === 'ended' ? 'matchEnd' : 'menu';
+        showScreen('career');
+        break;
+      case 'career-clear':
+        // Two-step rather than a confirm() dialog: the button relabels itself,
+        // so a misclick is one more click away instead of a modal's OK button.
+        if (app.careerClearArmed) {
+          clearCareer();
+          app.careerClearArmed = false;
+          $('career-clear').textContent = 'KARİYERİ SIFIRLA';
+          renderCareerScreen();
+          showToast('Kariyer sıfırlandı', 1800);
+        } else {
+          app.careerClearArmed = true;
+          $('career-clear').textContent = 'EMİN MİSİN? TEKRAR TIKLA';
+          setTimeout(() => {
+            if (!app.careerClearArmed) return;
+            app.careerClearArmed = false;
+            $('career-clear').textContent = 'KARİYERİ SIFIRLA';
+          }, 4000);
+        }
+        break;
       case 'back':
         showScreen(app.settingsReturn || 'menu');
         break;
@@ -334,6 +616,7 @@ function bindUI() {
           app.matchEndShown = false;
           app.matchEndTimer = 0;
           app.lastShots = 0;
+          app.matchSeconds = 0;
           resumeGame();
         }
         break;
@@ -389,6 +672,39 @@ function resetRigsForNewMatch() {
 
 const keys = new Set();
 
+/** True while the player is dead and the round is still running. */
+function isPlayerDead() {
+  return Boolean(app.game && !app.game.player.alive);
+}
+
+/**
+ * Take over the teammate currently being spectated.
+ *
+ * Refused — with a reason on screen — when there is nobody to take. A silent
+ * no-op would read as the key being broken.
+ */
+function tryPossession() {
+  const game = app.game;
+  if (!game) return;
+  const sp = game.spectate;
+  const targetId = sp && sp.mode === 'follow' ? sp.targetId : null;
+  if (!targetId) {
+    showToast('Devralacak takım arkadaşı yok', 1600);
+    return;
+  }
+  const target = game.match.actors.find((a) => a.id === targetId);
+  const name = target ? target.name : 'Takım arkadaşı';
+  const taken = possessTeammate(game, targetId);
+  if (!taken) {
+    showToast('Devralma başarısız', 1600);
+    return;
+  }
+  // The rig for the new body has to stop being drawn: the player is first
+  // person, and a rig left visible would put a model inside the camera.
+  app.hud.show(true);
+  showToast(`${name} devralındı`, 1800);
+}
+
 function bindInput(canvas) {
   const updateMoveInput = () => {
     if (!app.game) return;
@@ -429,9 +745,34 @@ function bindInput(canvas) {
       return;
     }
     if (e.repeat) return;
+    // ── dead? ────────────────────────────────────────────────────────────
+    // While dead the movement keys steer the free spectator camera instead of
+    // a body, so they must not be swallowed by the "add to keys" path above.
+    if (isPlayerDead()) {
+      switch (e.code) {
+        case 'KeyQ':
+          cycleSpectateTarget(app.game, -1);
+          break;
+        case 'KeyE':
+          cycleSpectateTarget(app.game, 1);
+          break;
+        case 'KeyF':
+          // Take control of whoever is on screen, CS2-style.
+          tryPossession();
+          break;
+        default:
+          break;
+      }
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) {
+        keys.add(e.code);
+        updateMoveInput();
+        return;
+      }
+    }
+
     switch (e.code) {
       case 'KeyR':
-        if (playerReloadNow(app.game)) app.audio.play('reload_start');
+        playerReloadNow(app.game); // the sound comes back through drainSounds
         break;
       case 'Digit1':
         if (playerSwitchTo(app.game, 'pistol')) app.audio.play('switch');
@@ -599,6 +940,10 @@ function loop(now) {
     updateGame(app.game, dt);
     afterGameUpdate(dt);
     renderGame(dt);
+    // Only count time actually spent in a live match. Counting frames while
+    // the match-end panel is open would inflate playtime by however long the
+    // player leaves the results on screen.
+    if (app.state === 'playing' && !app.game.paused) app.matchSeconds += dt;
   } else {
     renderMenuScene(dt);
   }
@@ -615,11 +960,17 @@ function afterGameUpdate(dt) {
   for (const s of drainSounds(game)) {
     switch (s.type) {
       case 'shot': {
-        const fromElswhere = s.x !== undefined;
-        if (fromElswhere) {
-          const d = Math.hypot(game.player.x - s.x, game.player.z - s.z);
-          if (d > 6) app.audio.play('tail', { distance: d });
-          else app.audio.play(s.weapon === 'pistol' ? 'shot_pistol' : 'shot_rifle', { distance: d });
+        // Enemy fire: place it in the stereo field. Distance alone (what this
+        // did before) made every off-screen shooter sound like it came from the
+        // same direction, so you could not tell a flank from a corridor ahead.
+        if (s.x !== undefined) {
+          const place = soundPlacement(game.player, { x: s.x, z: s.z }, game.pc.yaw);
+          const d = place.distance;
+          if (d > 6) {
+            app.audio.play('tail', { distance: d, pan: place.pan });
+          } else {
+            app.audio.play(s.weapon === 'pistol' ? 'shot_pistol' : 'shot_rifle', { distance: d, pan: place.pan });
+          }
         }
         break;
       }
@@ -631,6 +982,15 @@ function afterGameUpdate(dt) {
         break;
       case 'empty':
         app.audio.play('empty');
+        break;
+      case 'reload_start':
+        app.audio.play('reload_start');
+        break;
+      case 'reload_mag_out':
+        app.audio.play('reload_mag_out');
+        break;
+      case 'reload_mag_in':
+        app.audio.play('reload_mag_in');
         break;
       case 'reload_done':
         app.audio.play('reload_end');
@@ -669,12 +1029,21 @@ function afterGameUpdate(dt) {
     }
   }
 
-  // Footsteps while the player is actually moving on the ground.
-  if (game.player.alive && snap.phase === 'live' && game.player.speedFactor > 0.35) {
-    app.stepAccum += dt * (0.6 + game.player.speedFactor);
+  // Footsteps while the player is actually moving on the ground. Three
+  // flavours: crouch-walking is nearly silent, sprinting is loud and metallic.
+  // The threshold used to be a single `speedFactor > 0.35`, which made
+  // crouching inaudible *and* identical to walking — so the gait carried no
+  // information at all.
+  if (game.player.alive && snap.phase === 'live' && game.player.speedFactor > 0.12) {
+    const sprinting = game.pc.sprint;
+    const crouching = game.player.crouch > 0.5;
+    // Stride rate follows speed; a crouch walk is slower as well as quieter.
+    app.stepAccum += dt * (0.6 + game.player.speedFactor) * (crouching ? 0.6 : 1);
     if (app.stepAccum > 0.42) {
       app.stepAccum = 0;
-      app.audio.play('step');
+      if (crouching) app.audio.play('step_crouch');
+      else if (sprinting) app.audio.play('step_sprint');
+      else app.audio.play('step_walk');
     }
   }
 
@@ -696,10 +1065,19 @@ function renderGame(dt) {
   // it must not move the crosshair relative to the world. It is tiny (1.8 cm)
   // and at 20 m that is still ~0.05 deg, so the reticle stays honest; the
   // recoil kick is the larger one and is deliberately visible.
-  const bob = Math.sin(game.pc.bobPhase) * 0.018 * game.player.speedFactor;
-  camera.position.set(eye.x, eye.y + bob, eye.z);
-  const kick = (game.pc.kickPitch * Math.PI) / 180;
-  applyCameraAngles(camera, game.pc.yaw, game.pc.pitch - kick);
+  // While dead the camera comes from the spectator system: either following a
+  // teammate in third person, replaying the killcam, or flying free. Falling
+  // back to the player's own eye would park the camera inside a corpse.
+  const spec = !game.player.alive ? spectateCamera(game) : null;
+  if (spec) {
+    camera.position.set(spec.x, spec.y, spec.z);
+    applyCameraAngles(camera, spec.yaw, spec.pitch);
+  } else {
+    const bob = Math.sin(game.pc.bobPhase) * 0.018 * game.player.speedFactor;
+    camera.position.set(eye.x, eye.y + bob, eye.z);
+    const kick = (game.pc.kickPitch * Math.PI) / 180;
+    applyCameraAngles(camera, game.pc.yaw, game.pc.pitch - kick);
+  }
 
   // FOV blend between hip and ADS.
   const w = WEAPONS[game.player.loadout.current];
@@ -719,7 +1097,11 @@ function renderGame(dt) {
     const rig = app.rigs.get(actor.id);
     if (!rig) continue;
     if (actor.muzzleTimer === undefined) actor.muzzleTimer = 0;
-    updateRig(rig, actor, dt, performance.now() / 1000, false);
+    // `actor.isPlayer` — not `actor.isPlayer at rig creation` — because
+    // possession moves that flag onto a different body mid-match. The rig of
+    // whoever the player is currently driving must be hidden, and the rig of
+    // the body they left behind must come back.
+    updateRig(rig, actor, dt, performance.now() / 1000, actor.isPlayer);
     // Show a muzzle flash frame when a bot fires.
     if (actor.brain && actor.brain.shots > (actor._lastShots || 0)) {
       actor._lastShots = actor.brain.shots;
@@ -728,7 +1110,11 @@ function renderGame(dt) {
   }
 
   // Viewmodel pose (only in-game states).
-  app.viewmodel.root.visible = app.state === 'playing' || app.state === 'paused' || app.state === 'ended';
+  // A gun still floating in view while you are dead and watching someone else
+  // is the most obvious tell that the camera changed without the player model
+  // knowing.
+  app.viewmodel.root.visible =
+    game.player.alive && (app.state === 'playing' || app.state === 'paused' || app.state === 'ended');
   setViewModelWeapon(app.viewmodel, game.player.loadout.current);
   applyPose(app.viewmodel, {
     speedFactor: game.player.speedFactor,
@@ -912,5 +1298,11 @@ if (document.readyState === 'loading') {
 } else {
   boot();
 }
+
+// Exposed for the automated visual/feel tests (tools/visual.mjs): a headless
+// page has no way to reach a module-scoped `app` otherwise, and dispatching real
+// DOM events at a game it cannot inspect is not a measurement. Read-only by
+// convention; nothing in the game reads this back.
+globalThis.__SIFIR_NOKTA__ = app;
 
 export { app };

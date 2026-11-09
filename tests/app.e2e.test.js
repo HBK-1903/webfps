@@ -32,7 +32,7 @@ const bundle = await esbuild.build({
 });
 const code = bundle.outputFiles[0].text;
 
-function bootApp() {
+function bootApp({ seedSettings = null } = {}) {
   const errors = [];
   // jsdom reports uncaught script errors through the virtual console.
   const virtualConsole = new VirtualConsole();
@@ -70,6 +70,12 @@ function bootApp() {
     });
   }
   if (!window.AudioContext) window.AudioContext = null;
+
+  // Seed storage before the bundle runs: the app reads settings once, during
+  // module evaluation, so writing it afterwards would be invisible to it.
+  if (seedSettings) {
+    window.localStorage.setItem('sifirnokta.settings.v1', JSON.stringify(seedSettings));
+  }
 
   const script = window.document.createElement('script');
   script.textContent = code;
@@ -346,5 +352,37 @@ test('the install button reacts to the browser install prompt and is hidden with
   assert.equal(event.__prompted, true, 'clicking must fire the browser dialog');
   assert.match(toast.textContent, /kuruldu/i, 'user gets feedback after installing');
   assert.equal(button.hidden, true, 'a used prompt is gone: hide the button again');
+  assert.equal(errors.length, 0, `unexpected errors: ${errors.map(String).join(', ')}`);
+});
+
+// Settings are applied once at boot, before `app.game` exists, so anything
+// game-scoped inside `applySettings` runs against `undefined` and is skipped.
+// "Screen shake" is one of those options: a player who switched it off, reloaded
+// the page and started a match used to get it back, because nothing copied the
+// saved value onto the fresh game object. The symptom is subtle (a little camera
+// kick), so pin it here rather than trusting the menu toggle to mean anything.
+
+test('a saved "shake off" survives a reload and reaches the next match', async () => {
+  // What a previous session left on disk.
+  const { window, errors } = bootApp({
+    seedSettings: { shake: false, sensitivity: 2.5, volume: 0.6, fov: 90, quality: 'high', difficulty: 'normal' },
+  });
+  installRaf(window);
+  await new Promise((r) => setTimeout(r, 30));
+
+  // Nothing about the toggle is visible in the DOM while a match runs, so the
+  // persistence path is only checkable through the debug hook.
+  click(window, '[data-action="play"]');
+  click(window, '[data-difficulty="normal"]');
+  click(window, '[data-action="start-match"]');
+
+  const app = window.SIFIR_NOKTA;
+  assert.ok(app && app.game, 'maç başlamadı');
+  assert.equal(app.settings.shake, false, 'kayıtlı ayar yüklenmedi');
+  assert.equal(app.game.shake, false, 'sarsıntı ayarı yeni maça uygulanmadı');
+
+  // Toggling it back on must still work after the match exists.
+  const stored = JSON.parse(window.localStorage.getItem('sifirnokta.settings.v1'));
+  assert.equal(stored.shake, false);
   assert.equal(errors.length, 0, `unexpected errors: ${errors.map(String).join(', ')}`);
 });

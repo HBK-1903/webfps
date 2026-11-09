@@ -76,15 +76,67 @@ export function createRig(actor) {
 }
 
 
+// How long the topple takes, and how long the body then stays on the floor.
+// 0.55 s is long enough to read as a fall at 60 fps and short enough that it
+// never delays the next round; 4 s of corpse is enough to register as "he is
+// dead over there" without cluttering the lane.
+const DEATH_SECONDS = 0.55;
+const DEATH_LINGER = 4.5;
+
 /**
  * Update one rig from the actor's positional state.
  * `yaw` is the render yaw (bots use actor.yaw, player rig is hidden).
  */
 export function updateRig(rig, actor, dt, time, isPlayer) {
   const u = rig.userData;
-  rig.visible = actor.alive;
   rig.position.set(actor.x, 0, actor.z);
   rig.rotation.y = renderYaw(actor.yaw);
+
+  // ── death ────────────────────────────────────────────────────────────────
+  // A bot used to vanish the instant it died: `rig.visible = actor.alive`. That
+  // is the single most noticeable thing missing from a kill — no confirmation
+  // in the world, only a hitmarker and a number. Instead the body topples.
+  if (!actor.alive) {
+    if (u.deathAt === undefined || u.deathAt === null) {
+      u.deathAt = time;
+      // Tip to one side or the other, derived from the actor id so it is
+      // stable across frames. Without this every corpse in the match falls
+      // forward in the same pose, which reads as a bug rather than as death.
+      u.deathRoll = ((actor.id * 2654435761) % 1000) / 1000 * 0.7 - 0.35;
+    }
+    const t = (time - u.deathAt) / DEATH_SECONDS;
+    if (t >= 1) {
+      // Settled. Keep the body on the floor for a while, then let it go so a
+      // stack of corpses cannot accumulate across a long match.
+      rig.visible = time - u.deathAt < DEATH_LINGER;
+      rig.rotation.x = -Math.PI / 2;
+      rig.rotation.z = u.deathRoll || 0;
+      rig.position.y = 0.18;
+      return;
+    }
+    rig.visible = true;
+    // Ease-out: fast at first, slowing as it lands. A linear fall reads as a
+    // lift being lowered rather than a body dropping.
+    const k = 1 - (1 - t) * (1 - t);
+    rig.rotation.x = -k * (Math.PI / 2);
+    rig.rotation.z = (u.deathRoll || 0) * k;
+    // Sink slightly as it falls, so the feet do not stay above the floor plane.
+    rig.position.y = k * 0.18;
+    // Limbs go slack.
+    u.legL.rotation.x = k * 0.6;
+    u.legR.rotation.x = -k * 0.3;
+    u.armL.rotation.x = k * 1.1;
+    u.armR.rotation.x = -k * 0.7;
+    u.weaponPivot.rotation.x = k * 1.4;
+    u.flash.visible = false;
+    return;
+  }
+  // Alive again (new round): forget the death so the next one animates.
+  u.deathAt = null;
+  rig.rotation.x = 0;
+  rig.rotation.z = 0;
+  rig.position.y = 0;
+  rig.visible = true;
 
   const swing = Math.sin(time * (6 + actor.speedFactor * 6)) * (0.15 + actor.speedFactor * 0.75);
   u.legL.rotation.x = swing;

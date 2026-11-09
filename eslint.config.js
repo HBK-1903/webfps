@@ -32,6 +32,23 @@ export default [
     },
   },
   {
+    // Tools that run code inside a browser page. `page.evaluate()` bodies are
+    // serialised and executed in Chromium, so they may use DOM globals even
+    // though the file itself is Node.
+    files: ['tools/visual.mjs', 'tools/audio-check.mjs', 'tools/audio-live.mjs'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly', document: 'readonly', console: 'readonly',
+        requestAnimationFrame: 'readonly', MouseEvent: 'readonly',
+        createImageBitmap: 'readonly', OffscreenCanvas: 'readonly',
+        OfflineAudioContext: 'readonly', AudioContext: 'readonly', KeyboardEvent: 'readonly',
+        performance: 'readonly', globalThis: 'readonly',
+      },
+    },
+  },
+  {
     // Service worker: runs in its own global scope — `self` instead of `window`,
     // and no DOM at all. Declared separately so the errors that matter (a typo
     // in cache names, an undefined helper) are still caught.

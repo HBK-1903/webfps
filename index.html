@@ -106,10 +106,61 @@
           </div>
         </div>
 
+        <!-- Tactical map. Drawn on a canvas because there are ~40 boxes plus up
+             to a dozen markers: as DOM nodes it would be slower and would need
+             a node per box. The canvas is sized in CSS pixels and scaled by the
+             device pixel ratio in hud.js, so it stays sharp on a retina screen.
+
+             Everything inside is aria-hidden: a live enemy-position feed read
+             aloud would be noise, and the same information is available in the
+             compass text (which *is* announced). -->
+        <div class="minimap-wrap" aria-hidden="true">
+          <canvas id="minimap" class="minimap" width="180" height="124"></canvas>
+          <div class="minimap-caption">
+            <span id="minimap-lane" class="minimap-lane">—</span>
+          </div>
+        </div>
+
+        <!-- Compass strip. The tick marks move with the camera, so the letters
+             passing the centre show the heading without a separate number. -->
+        <div class="compass-wrap" aria-hidden="true">
+          <div class="compass-strip" id="compass-strip">
+            <!-- Two copies of the eight points: the strip scrolls, so a single
+                 copy would run out of letters at the wrap-around. -->
+            <span class="compass-tick" data-bearing="0">K</span>
+            <span class="compass-tick" data-bearing="45">KD</span>
+            <span class="compass-tick" data-bearing="90">D</span>
+            <span class="compass-tick" data-bearing="135">GD</span>
+            <span class="compass-tick" data-bearing="180">G</span>
+            <span class="compass-tick" data-bearing="225">GB</span>
+            <span class="compass-tick" data-bearing="270">B</span>
+            <span class="compass-tick" data-bearing="315">KB</span>
+            <span class="compass-tick" data-bearing="0">K</span>
+            <span class="compass-tick" data-bearing="45">KD</span>
+            <span class="compass-tick" data-bearing="90">D</span>
+            <span class="compass-tick" data-bearing="135">GD</span>
+            <span class="compass-tick" data-bearing="180">G</span>
+            <span class="compass-tick" data-bearing="225">GB</span>
+            <span class="compass-tick" data-bearing="270">B</span>
+            <span class="compass-tick" data-bearing="315">KB</span>
+          </div>
+          <div class="compass-needle"></div>
+        </div>
+        <!-- The heading is also exposed as text for screen readers, since the
+             strip above is a purely visual transform. -->
+        <div id="compass-text" class="visually-hidden" role="status" aria-live="polite"></div>
+
         <div id="damage-vignette" class="damage-vignette" aria-hidden="true"></div>
         <div id="damage-dir" class="damage-dir" aria-hidden="true"></div>
-        <div id="death-overlay" class="death-overlay hidden">
+        <!-- Death report: who killed you, with what, from where. Before this
+             existed the screen simply froze with no explanation at all. -->
+        <div id="death-overlay" class="death-overlay hidden" aria-live="polite" aria-atomic="true">
           <div class="death-title">ELENDİN</div>
+          <div class="death-by">
+            <span id="death-killer">—</span>
+            <span id="death-headshot" class="death-badge hidden">KAFA</span>
+          </div>
+          <div id="death-detail" class="death-detail"></div>
           <div id="death-sub" class="death-sub">Raund devam ediyor…</div>
         </div>
         <div id="fps" class="fps" aria-hidden="true">60 FPS</div>
@@ -127,6 +178,7 @@
         <nav class="menu-nav" aria-label="Ana menü seçenekleri">
           <button class="btn btn-primary" data-action="play">OYNA</button>
           <button class="btn" data-action="settings">AYARLAR</button>
+          <button class="btn" data-action="career">KARİYER</button>
           <button class="btn" data-action="controls">KONTROLLER</button>
           <button id="install-btn" class="btn btn-install" data-action="install" hidden>UYGULAMA OLARAK YÜKLE</button>
           <button class="btn" data-action="quit">ÇIKIŞ</button>
@@ -242,16 +294,74 @@
       </div>
 
       <!-- ===================== MATCH END ===================== -->
+      <!-- Career: everything you have ever done, across every match. -->
+      <div id="career-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="career-title">
+        <div class="panel panel-wide">
+          <h2 id="career-title">KARİYER</h2>
+          <p id="career-sub" class="panel-sub">Henüz maç yok</p>
+
+          <div id="career-highlights" class="career-highlights"></div>
+
+          <h3 class="career-heading">GENEL</h3>
+          <div id="career-stats" class="match-stats career-stats"></div>
+
+          <h3 class="career-heading">ZORLUĞA GÖRE</h3>
+          <div id="career-difficulty" class="career-difficulty"></div>
+
+          <h3 class="career-heading">İSABET TRENDİ</h3>
+          <div class="career-trend">
+            <canvas id="career-trend-canvas" width="640" height="96" aria-hidden="true"></canvas>
+            <p id="career-trend-text" class="career-trend-text"></p>
+          </div>
+
+          <h3 class="career-heading">SON MAÇLAR</h3>
+          <div id="career-history" class="career-history"></div>
+
+          <div class="panel-actions column">
+            <button class="btn btn-primary" data-action="back">GERİ</button>
+            <button id="career-clear" class="btn danger" data-action="career-clear">KARİYERİ SIFIRLA</button>
+          </div>
+        </div>
+      </div>
+
       <div id="match-end-screen" class="screen overlay hidden" role="dialog" aria-modal="true" aria-labelledby="match-end-title">
         <div class="panel">
           <h2 id="match-end-title">MAÇ BİTTİ</h2>
           <p id="match-end-score" class="panel-sub">3 - 1</p>
           <div id="match-end-stats" class="match-stats"></div>
+          <p id="match-end-career" class="match-end-career" aria-live="polite"></p>
+          <div class="panel-actions row">
+            <button class="btn" data-action="career">KARİYER</button>
+          </div>
           <div class="panel-actions column">
             <button class="btn btn-primary" data-action="rematch">YENİDEN OYNA</button>
             <button class="btn" data-action="menu">ANA MENÜ</button>
           </div>
         </div>
+      </div>
+
+      <!-- Killcam. Letterbox bars and a caption, so it is unmistakable that
+           this is a replay and not the live game. -->
+      <div id="killcam-bar" class="killcam hidden" aria-live="polite">
+        <div class="killcam-bar top"></div>
+        <div class="killcam-bar bottom"></div>
+        <div class="killcam-caption">
+          <span class="killcam-kicker">TEKRAR</span>
+          <span id="killcam-name" class="killcam-name">—</span>
+          <span class="killcam-kicker">GÖZÜNDEN</span>
+        </div>
+        <div class="killcam-progress"><div id="killcam-fill" class="killcam-progress-fill"></div></div>
+      </div>
+
+      <!-- Spectator bar. Says who you are watching and how to change it. -->
+      <div id="spectate-bar" class="spectate-bar hidden" role="status">
+        <span class="spectate-label">İZLİYORSUN</span>
+        <span id="spectate-name" class="spectate-name">—</span>
+        <span id="spectate-mode" class="spectate-mode"></span>
+        <span class="spectate-keys">
+          <kbd>Q</kbd><kbd>E</kbd> değiştir
+          <kbd>A</kbd><kbd>D</kbd> serbest kamera
+        </span>
       </div>
 
       <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>

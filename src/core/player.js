@@ -28,7 +28,7 @@ export function createPlayerController(actor) {
   };
 }
 
-export function setAngles(pc, yaw, pitch) {
+function setAngles(pc, yaw, pitch) {
   pc.yaw = yaw;
   pc.pitch = Math.max(-(PLAYER.pitchLimit * Math.PI) / 180, Math.min((PLAYER.pitchLimit * Math.PI) / 180, pitch));
   pc.actor.yaw = yaw;
@@ -42,7 +42,7 @@ export function addLook(pc, dxDeg, dyDeg) {
   setAngles(pc, wrapYaw(yaw), pitch);
 }
 
-export function wrapYaw(y) {
+function wrapYaw(y) {
   const t = Math.PI * 2;
   let r = y % t;
   if (r > Math.PI) r -= t;
@@ -179,13 +179,4 @@ export function cameraPitch(pc) {
     -(PLAYER.pitchLimit * Math.PI) / 180,
     Math.min((PLAYER.pitchLimit * Math.PI) / 180, pc.pitch - (pc.kickPitch * Math.PI) / 180),
   );
-}
-
-export function absorbRecoil(pc) {
-  const w = activeWeapon(pc.actor.loadout);
-  pc.kickPitch += w.recoilPitch;
-  const yawKick = w.recoilYaw;
-  w.recoilPitch = 0;
-  w.recoilYaw = 0;
-  return yawKick;
 }

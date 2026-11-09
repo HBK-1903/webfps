@@ -80,7 +80,7 @@ export function markDead(actor) {
   return true;
 }
 
-export function eyeHeight(actor) {
+function eyeHeight(actor) {
   const base = PLAYER.eyeHeight;
   const crouched = PLAYER.crouchEyeHeight;
   return base + (crouched - base) * actor.crouch;

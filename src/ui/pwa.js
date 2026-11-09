@@ -63,12 +63,12 @@ export function registerServiceWorker({ onReady } = {}) {
 }
 
 /** True when the browser has offered an install prompt we can fire later. */
-export function canInstall() {
+function canInstall() {
   return deferredPrompt !== null;
 }
 
 /** True when we are already running as an installed app. */
-export function isStandalone() {
+function isStandalone() {
   if (!hasWindow) return false;
   return (
     window.matchMedia?.('(display-mode: fullscreen)')?.matches === true ||
@@ -78,7 +78,7 @@ export function isStandalone() {
 }
 
 /** Fires the browser's install dialog. Resolves to true if the user accepted. */
-export async function promptInstall() {
+async function promptInstall() {
   if (!deferredPrompt) return false;
   const event = deferredPrompt;
   deferredPrompt = null;

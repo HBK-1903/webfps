@@ -18,7 +18,7 @@ export function circleOverlapsBox(x, z, radius, b) {
  * the actor's step height are treated as low cover the actor simply walks on
  * top of? No: this game is flat-floor only, every box is a full obstacle.
  */
-export function resolveCircle(x, z, radius, boxes, skipBoxes) {
+function resolveCircle(x, z, radius, boxes, skipBoxes) {
   let px = x;
   let pz = z;
   let hit = false;
@@ -77,7 +77,7 @@ export function moveCircle(x, z, dx, dz, radius, boxes) {
  * Ray vs axis-aligned box (slab method). Returns entry distance or -1.
  * `dir` must be normalised.
  */
-export function rayBox(ox, oy, oz, dx, dy, dz, b, maxDist) {
+function rayBox(ox, oy, oz, dx, dy, dz, b, maxDist) {
   let tmin = 0;
   let tmax = maxDist;
   // X

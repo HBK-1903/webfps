@@ -1,6 +1,6 @@
 # QA RAPORU — SIFIR NOKTA
 
-Üretim: `node tools/qa.mjs` · 2026-11-08 16:55 UTC
+Üretim: `node tools/qa.mjs` · 2026-11-09 16:59 UTC
 
 | Geçti | Uyarı | Hata |
 |---|---|---|
@@ -14,32 +14,32 @@
 
 | Durum | Senaryo | Ölçüm |
 |---|---|---|
-| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 2-3, 0-3, 0-3, 1-3 |
-| ✅ PASS | raund süresi | ort 40.8 s · en uzun 80.0 s |
+| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 1-3, 0-3, 0-3, 2-2 |
+| ✅ PASS | raund süresi | ort 42.5 s · en uzun 80.0 s |
 | ✅ PASS | tıkanma oranı | 1/15 raund süre limitiyle karara bağlandı |
 
 ## maç/normal
 
 | Durum | Senaryo | Ölçüm |
 |---|---|---|
-| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 1-3, 1-3, 0-3, 0-3 |
-| ✅ PASS | raund süresi | ort 35.9 s · en uzun 80.0 s |
-| ✅ PASS | tıkanma oranı | 2/14 raund süre limitiyle karara bağlandı |
+| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 2-3, 2-3, 0-3, 0-3 |
+| ✅ PASS | raund süresi | ort 36.1 s · en uzun 80.0 s |
+| ✅ PASS | tıkanma oranı | 2/16 raund süre limitiyle karara bağlandı |
 
 ## maç/hard
 
 | Durum | Senaryo | Ölçüm |
 |---|---|---|
-| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 0-3, 0-3, 1-3, 1-3 |
-| ✅ PASS | raund süresi | ort 26.0 s · en uzun 67.5 s |
-| ✅ PASS | tıkanma oranı | 0/14 raund süre limitiyle karara bağlandı |
+| ✅ PASS | tamamlanma | 4/4 maç bitti · skorlar 0-3, 0-3, 3-1, 0-3 |
+| ✅ PASS | raund süresi | ort 26.8 s · en uzun 57.1 s |
+| ✅ PASS | tıkanma oranı | 0/13 raund süre limitiyle karara bağlandı |
 
 ## zorluk
 
 | Durum | Senaryo | Ölçüm |
 |---|---|---|
-| ✅ PASS | bot isabet oranı | kolay 24% (173/711) · normal 21% (133/631) · zor 26% (125/474) |
-| ✅ PASS | ayrışma | zor/kolay isabet farkı 8% |
+| ✅ PASS | bot isabet oranı | kolay 25% (192/763) · normal 23% (132/564) · zor 31% (117/373) |
+| ✅ PASS | ayrışma | zor/kolay isabet farkı 25% |
 | ✅ PASS | hata payı | zor botlar da kaçırıyor (LOS ve nişan hatası korunuyor) |
 | ✅ PASS | canlı geçiş | tüm botlar yeni profile geçti |
 | ✅ PASS | hasar sabitliği | maks can 100/100 (zorluk hasarı değiştirmiyor) |

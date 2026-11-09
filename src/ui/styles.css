@@ -599,3 +599,542 @@ kbd {
   border: 1px solid var(--panel-line);
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
 }
+
+/* ---------------------------------------------------------- tactical map
+   Bottom left, above the vitals. Kept small and deliberately low-contrast:
+   a map that pulls the eye away from the crosshair is a net loss in a game
+   where the crosshair is the thing you must watch. */
+.minimap-wrap {
+  position: absolute;
+  left: 18px;
+  bottom: 92px;
+  width: 180px;
+  padding: 6px 6px 4px;
+  background: rgba(8, 14, 18, 0.72);
+  border: 1px solid var(--panel-line);
+  border-radius: 3px;
+  backdrop-filter: blur(2px);
+}
+.minimap {
+  display: block;
+  width: 168px;
+  height: 116px;
+  /* The canvas is drawn at DPR in hud.js; CSS sets the layout size. */
+  image-rendering: auto;
+}
+.minimap-caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+}
+.minimap-lane { color: var(--accent); }
+
+/* ---------------------------------------------------------- compass
+   A strip of letters that slides past a fixed needle. Simpler and calmer than
+   a rotating dial, and it stays readable at the 8-10 px this has to fit in. */
+.compass-wrap {
+  position: absolute;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  height: 22px;
+  overflow: hidden;
+  /* Fade the ends so ticks enter and leave instead of popping. */
+  mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 22%, #000 78%, transparent);
+}
+.compass-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  height: 100%;
+  will-change: transform;
+}
+.compass-tick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 74px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+}
+.compass-tick.major { color: #eafcfb; font-weight: 700; text-shadow: 0 0 8px rgba(79, 209, 197, 0.5); }
+/* The needle sits *behind* the letters and only marks the top and bottom
+   edges. A full-height line drawn over the strip ran straight through the
+   letter under the needle, which is precisely the letter you need to read. */
+.compass-needle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 4px;
+  background: var(--accent);
+  opacity: 0.9;
+  z-index: 0;
+}
+.compass-needle::after {
+  content: '';
+  position: absolute;
+  top: 18px;
+  left: 0;
+  width: 1px;
+  height: 4px;
+  background: var(--accent);
+  opacity: 0.9;
+}
+.compass-strip { z-index: 1; }
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── career screen ──────────────────────────────────────────────────────── */
+
+.panel-wide { width: min(760px, 92vw); }
+
+.career-heading {
+  margin: 18px 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+/* The four numbers worth seeing at a glance, sized so they read first and the
+   tables below read second. */
+.career-highlights {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.career-highlight {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.career-highlight b {
+  display: block;
+  font-size: 22px;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.career-highlight span {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.career-stats { margin-top: 2px; }
+
+.career-difficulty {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.career-diff {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.career-diff b {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.career-diff .diff-row {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.career-diff .diff-row span:last-child { color: var(--text); }
+
+.career-diff.empty { opacity: 0.45; }
+
+.career-trend { display: flex; flex-direction: column; gap: 6px; }
+
+.career-trend canvas {
+  width: 100%;
+  height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.career-trend-text { margin: 0; font-size: 11px; color: var(--text-dim); }
+
+.career-history { display: flex; flex-direction: column; gap: 4px; }
+
+.career-row {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr 0.7fr 0.7fr 0.8fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.career-row.head {
+  background: none;
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding-bottom: 2px;
+}
+
+.career-row .won { color: var(--accent); }
+.career-row .lost { color: var(--danger); }
+.career-row .drawn { color: var(--text-dim); }
+
+.career-empty {
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+}
+
+.match-end-career {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.match-end-career b { color: var(--text); }
+
+@media (max-width: 620px) {
+  .career-highlights { grid-template-columns: repeat(2, 1fr); }
+  .career-difficulty { grid-template-columns: 1fr; }
+  .career-row { grid-template-columns: 1fr 1fr; }
+}
+
+/* The career panel is taller than a laptop viewport. Without this it simply
+   ran off the top and bottom of the screen with no way to reach either end —
+   the title and the GERİ button were both unreachable. Anchoring the flex
+   centring with `margin: auto` keeps it centred when it fits and lets the
+   screen scroll when it does not. */
+#career-screen {
+  justify-content: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px 4vmin;
+}
+
+#career-screen > .panel {
+  margin: auto;
+  flex: 0 0 auto;
+  max-height: none;
+}
+
+/* A visible scrollbar, because a panel whose content continues below the fold
+   with no affordance reads as a broken layout. */
+#career-screen::-webkit-scrollbar { width: 10px; }
+#career-screen::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.03); }
+#career-screen::-webkit-scrollbar-thumb {
+  background: rgba(79, 209, 197, 0.35);
+  border-radius: 5px;
+}
+
+/* ── death report & spectator ───────────────────────────────────────────── */
+
+/* The death card sits above the spectator view but never blocks the mouse:
+   the player may already be steering the spectator camera when it appears. */
+.death-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 15;
+}
+
+.death-card {
+  min-width: min(420px, 88vw);
+  padding: 18px 26px 20px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(10, 16, 20, 0.94), rgba(8, 12, 16, 0.88));
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--danger);
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  animation: death-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes death-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+.death-kicker {
+  margin: 0 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.death-killer {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.death-badge {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: rgba(255, 215, 138, 0.16);
+  color: #ffd78a;
+  border: 1px solid rgba(255, 215, 138, 0.35);
+  font-weight: 700;
+  transform: translateY(-2px);
+}
+
+.death-detail {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.death-team {
+  margin: 10px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.spectate-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(8, 12, 16, 0.82);
+  backdrop-filter: blur(4px);
+  font-size: 12px;
+  z-index: 16;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.spectate-label {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+}
+
+.spectate-name { color: var(--accent); font-weight: 700; letter-spacing: 0.04em; }
+
+.spectate-mode { color: var(--text-dim); font-size: 11px; }
+
+.spectate-keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 10px;
+  border-left: 1px solid var(--line);
+  padding-left: 12px;
+}
+
+.spectate-keys kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 1px 4px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 620px) {
+  .spectate-keys { display: none; }
+}
+
+/* The death report sits on top of a spectator view of a teammate, so the text
+   has to hold its own against whatever is behind it: a bright vest, a lit wall,
+   the sky. A soft panel behind the block is the cheapest honest fix — the
+   earlier version put the killer's name straight over a teammate's backpack. */
+.death-by {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 20px;
+  border-radius: 8px;
+  background: rgba(6, 8, 10, 0.72);
+  backdrop-filter: blur(6px);
+  font-size: clamp(16px, 2.6vmin, 24px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #eef4f4;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+}
+
+.death-detail {
+  padding: 5px 16px;
+  border-radius: 6px;
+  background: rgba(6, 8, 10, 0.66);
+  backdrop-filter: blur(6px);
+  font-size: clamp(11px, 1.5vmin, 13px);
+  letter-spacing: 0.08em;
+  color: #b9cbcd;
+  font-variant-numeric: tabular-nums;
+  min-height: 1em;
+}
+
+/* The title is large enough to read on its own, but a shadow keeps it legible
+   over a bright sky without needing another panel. */
+.death-title {
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85), 0 0 3px rgba(0, 0, 0, 0.9);
+}
+
+.death-sub {
+  padding: 4px 14px;
+  border-radius: 6px;
+  background: rgba(6, 8, 10, 0.6);
+  color: #9db0b2;
+}
+
+/* ── killcam ────────────────────────────────────────────────────────────── */
+
+/* Above the HUD (z-index 10) on purpose: the letterbox bars have to cover the
+   team lists and ammo counter, otherwise the corners read as a live match and
+   the replay is ambiguous. The first version sat at 14 and the HUD punched
+   through the black bars. */
+.killcam {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+
+/* While the replay runs, the HUD steps back. It is not the live game and the
+   numbers on it are the dead player's.
+   `:has()` because the killcam element is a sibling of the HUD, not inside it —
+   the `~` combinator would only work if it came first in the document. */
+body:has(#killcam-bar:not(.hidden)) #hud .team-list,
+body:has(#killcam-bar:not(.hidden)) #hud .fps,
+body:has(#killcam-bar:not(.hidden)) #hud .vitals,
+body:has(#killcam-bar:not(.hidden)) #hud .ammo,
+body:has(#killcam-bar:not(.hidden)) #hud .minimap-wrap,
+body:has(#killcam-bar:not(.hidden)) #hud .round-status {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+/* Letterbox bars. They are the universally understood "this is a replay"
+   signal, and they also cover the HUD corners that would otherwise sit on top
+   of the footage and make it read as live gameplay. */
+.killcam-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 9vh;
+  background: #05080a;
+}
+
+.killcam-bar.top { top: 0; }
+.killcam-bar.bottom { bottom: 0; }
+
+.killcam-caption {
+  position: absolute;
+  top: calc(9vh + 26px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  background: rgba(5, 8, 10, 0.78);
+  backdrop-filter: blur(4px);
+}
+
+.killcam-kicker {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: #8fa3a9;
+}
+
+.killcam-name {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #ff9d8a;
+}
+
+.killcam-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 9vh;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.killcam-progress-fill {
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: var(--accent);
+}

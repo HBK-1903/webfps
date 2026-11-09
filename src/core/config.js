@@ -2,7 +2,6 @@
 // elsewhere — everything reads from here (or from a profile derived from here).
 
 export const GAME_TITLE = 'SIFIR NOKTA';
-export const GAME_SUBTITLE = 'Taktik Eğitim Tesisi';
 export const GAME_VERSION = '0.9.0';
 
 export const PLAYER = {
@@ -106,9 +105,7 @@ export const WEAPONS = {
   },
 };
 
-export const WEAPON_ORDER = ['pistol', 'rifle'];
 
-export const DIFFICULTY_ORDER = ['easy', 'normal', 'hard'];
 
 // Difficulty only ever changes reaction, aim quality, decision speed and
 // coordination. Vision is always LOS-limited and aim error is never zero.

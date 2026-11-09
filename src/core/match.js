@@ -4,6 +4,7 @@
 import { MATCH, DIFFICULTY } from './config.js';
 import { createActor, resetActorForRound, markDead, NAMES_A, NAMES_B } from './actor.js';
 import { SPAWNS } from './map.js';
+import { activeWeapon } from './weapon.js';
 
 export const PHASE = {
   FREEZE: 'freeze', // countdown before the round: no fire, no movement
@@ -240,6 +241,33 @@ export function registerDamage(match, attacker, victim, result) {
     if (!killActor(match, victim)) return { died: false };
     attacker.kills += 1;
     match.roundKills.push({ by: attacker.name, victim: victim.name, headshot: result.headshot, team: attacker.team });
+    // The death screen needs to say who, with what, from where and whether it
+    // was a headshot. The `death` event only carries the victim, so the killer
+    // side of the story is recorded here, where both actors are in hand —
+    // `Bot.onShot` resolves long before the death event is drained.
+    match.lastDeath = {
+      attackerId: attacker.id,
+      attackerName: attacker.name,
+      victimId: victim.id,
+      victimName: victim.name,
+      weapon: (() => {
+        // Bots have no `weaponName`; the player does. Resolve from the loadout
+        // for both so the death screen never shows an empty weapon line.
+        try {
+          return activeWeapon(attacker.loadout).def.name;
+        } catch {
+          return '';
+        }
+      })(),
+      headshot: Boolean(result.headshot),
+      // Distance is measured between eye positions, which is what the report
+      // claims: "17 m". Feet-to-feet would be wrong by up to a metre at range.
+      distance: Math.hypot(
+        (attacker.x || 0) - (victim.x || 0),
+        (attacker.z || 0) - (victim.z || 0),
+      ),
+      at: match.time,
+    };
     return { died: true };
   }
   return { died: false };

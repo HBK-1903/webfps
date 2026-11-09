@@ -2,6 +2,14 @@
 // DOM is untouched on frames where nothing moved.
 
 import { MATCH } from '../core/config.js';
+import { MAP_BOXES } from '../core/map.js';
+import {
+  toUnit,
+  bearing,
+  cardinal,
+  locationLabel,
+  buildMarkers,
+} from '../core/tacticalmap.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -36,8 +44,21 @@ export function createHud() {
     damageDir: $('damage-dir'),
     deathOverlay: $('death-overlay'),
     deathSub: $('death-sub'),
+    deathKiller: $('death-killer'),
+    deathDetail: $('death-detail'),
+    deathHeadshot: $('death-headshot'),
+    killcamBar: $('killcam-bar'),
+    killcamName: $('killcam-name'),
+    killcamFill: $('killcam-fill'),
+    spectateBar: $('spectate-bar'),
+    spectateName: $('spectate-name'),
+    spectateMode: $('spectate-mode'),
     fps: $('fps'),
     diffTag: $('difficulty-tag'),
+    minimap: $('minimap'),
+    minimapLane: $('minimap-lane'),
+    compassStrip: $('compass-strip'),
+    compassText: $('compass-text'),
   };
 
   const pips = { A: [], B: [] };
@@ -71,6 +92,170 @@ export function createHud() {
     cache.set(key, on);
     node.classList.toggle(cls, on);
   };
+
+  // ── tactical map ──────────────────────────────────────────────────────
+  // The box list never changes, so it is projected to unit space once instead
+  // of per frame. Only the markers move.
+  const mapCtx = el.minimap ? el.minimap.getContext('2d') : null;
+  const CANVAS_W = el.minimap ? el.minimap.width : 0;
+  const CANVAS_H = el.minimap ? el.minimap.height : 0;
+  const mapBoxes = MAP_BOXES.map((b) => {
+    // Footprint only: a top-down map of a single-storey arena does not need
+    // height, and drawing every tall box at its full height would turn the
+    // map into a solid block.
+    const a = toUnit(b.x - b.w / 2, b.z - b.d / 2);
+    const c = toUnit(b.x + b.w / 2, b.z + b.d / 2);
+    return { x: a.u * CANVAS_W, y: a.v * CANVAS_H, w: (c.u - a.u) * CANVAS_W, h: (c.v - a.v) * CANVAS_H, kind: b.kind };
+  });
+  let lastCompassDeg = -1;
+  let lastCompassText = '';
+
+  function drawMinimap(p) {
+    if (!mapCtx || !CANVAS_W) return;
+    const ctx = mapCtx;
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+
+    // Deck
+    ctx.fillStyle = 'rgba(22, 34, 41, 0.92)';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    // Lane bands, matching the floor strips in the world: warm north, brass
+    // mid, cool south. Same colours as render/scene.js LANE_STRIPS so the map
+    // and the floor agree; a map that disagrees with the world is worse than
+    // no map.
+    const lanes = [
+      { z: -13.5, color: 'rgba(138, 106, 66, 0.30)' },
+      { z: 0, color: 'rgba(111, 122, 82, 0.26)' },
+      { z: 13.5, color: 'rgba(63, 106, 125, 0.30)' },
+    ];
+    for (const lane of lanes) {
+      const top = toUnit(0, lane.z - 2.1).v * CANVAS_H;
+      const bot = toUnit(0, lane.z + 2.1).v * CANVAS_H;
+      ctx.fillStyle = lane.color;
+      ctx.fillRect(0, top, CANVAS_W, bot - top);
+    }
+
+    // Geometry. Walls read as solid, cover and crates as lighter, so the shape
+    // of a corridor is legible at 168 px wide.
+    for (const b of mapBoxes) {
+      if (b.kind === 'boundary') continue; // the map edge is the map edge
+      ctx.fillStyle = b.kind === 'crate' ? 'rgba(150, 128, 96, 0.75)' : 'rgba(150, 178, 190, 0.42)';
+      ctx.fillRect(b.x, b.y, Math.max(1, b.w), Math.max(1, b.h));
+    }
+
+    // Spawn pads, so which end is whose is obvious.
+    const padA = toUnit(-26, -10);
+    const padA2 = toUnit(-26 + 5.5, 10);
+    ctx.fillStyle = 'rgba(74, 163, 224, 0.16)';
+    ctx.fillRect(padA.u * CANVAS_W, 0, (padA2.u - padA.u) * CANVAS_W, CANVAS_H);
+    const padB = toUnit(26 - 5.5, -10);
+    const padB2 = toUnit(26, 10);
+    ctx.fillStyle = 'rgba(224, 138, 74, 0.16)';
+    ctx.fillRect(padB.u * CANVAS_W, 0, (padB2.u - padB.u) * CANVAS_W, CANVAS_H);
+
+    // Markers. Contacts are drawn with an age-based fade: a fresh report is
+    // bright, a five-second-old one is a ghost. That difference is the whole
+    // point — it tells you how much to trust the dot.
+    const markers = buildMarkers({
+      player: p.playerPos ? { id: 'me', x: p.playerPos.x, z: p.playerPos.z } : null,
+      teamMates: p.teamMates,
+      contacts: p.contacts,
+      now: p.now,
+    });
+    for (const m of markers) {
+      const { u, v } = toUnit(m.x, m.z);
+      const px = u * CANVAS_W;
+      const py = v * CANVAS_H;
+      if (m.kind === 'mate') {
+        ctx.fillStyle = 'rgba(74, 163, 224, 0.95)';
+        ctx.beginPath();
+        ctx.arc(px, py, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (m.kind === 'contact') {
+        const alpha = Math.max(0.15, 1 - m.age / 6);
+        ctx.strokeStyle = `rgba(224, 90, 74, ${alpha.toFixed(2)})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(px, py, 3.4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // The player, as an arrow so the heading is readable at a glance.
+    if (p.playerPos) {
+      const { u, v } = toUnit(p.playerPos.x, p.playerPos.z);
+      const px = u * CANVAS_W;
+      const py = v * CANVAS_H;
+      ctx.save();
+      ctx.translate(px, py);
+      // Screen +y is map +z; the camera looks along (sin yaw, -cos yaw), so the
+      // arrow rotates by yaw with no sign flip. Getting this wrong points the
+      // arrow backwards, which is the single most disorienting map bug there is.
+      ctx.rotate(p.yaw);
+      ctx.fillStyle = '#eafcfb';
+      ctx.beginPath();
+      ctx.moveTo(0, -5.2);
+      ctx.lineTo(3.4, 3.6);
+      ctx.lineTo(0, 1.6);
+      ctx.lineTo(-3.4, 3.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Frame
+    ctx.strokeStyle = 'rgba(120, 200, 220, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, CANVAS_W - 1, CANVAS_H - 1);
+  }
+
+  /**
+   * Compass: shift the strip so the letter matching the heading sits under the
+   * needle. One tick is 45 degrees and 74 px wide in CSS, so the strip moves
+   * 74/45 px per degree.
+   */
+  function drawCompass(p) {
+    const deg = bearing(p.yaw);
+    if (el.compassStrip && Math.abs(deg - lastCompassDeg) > 0.3) {
+      lastCompassDeg = deg;
+      // Geometry: one tick per 45 degrees, so a tick is TICK_W px wide and the
+      // strip moves TICK_W/45 px per degree. The strip holds two copies of the
+      // 8 points (16 ticks) so there is always material on both sides of the
+      // needle; the copy index is chosen to land in the middle of the strip.
+      const ticks = el.compassStrip.children.length;
+      const TICK_W = el.compassStrip.children[0] ? el.compassStrip.children[0].offsetWidth || 74 : 74;
+      const perTurn = 8;
+      const cycle = Math.floor(deg / 45);
+      const index = cycle + perTurn; // always the second copy: 8..15
+      const centreX = index * TICK_W + TICK_W / 2;
+      const wrapperW = el.compassStrip.parentElement?.clientWidth || 220;
+      // Put the chosen tick's centre under the wrapper's centre, then shift by
+      // the fraction of the current 45-degree sector we have turned through.
+      const sub = (deg % 45) * (TICK_W / 45);
+      const offset = wrapperW / 2 - centreX - sub;
+      el.compassStrip.style.transform = `translateX(${offset.toFixed(1)}px)`;
+      // Highlight whichever point the needle is actually on. `delta` is the
+      // absolute angular distance on the circle, so *small* means "under the
+      // needle" — the first version compared it to 170 and therefore lit up
+      // every tick except the one being looked at, which is why the centre
+      // letter stayed dim.
+      for (let i = 0; i < ticks; i++) {
+        const tick = el.compassStrip.children[i];
+        const tickDeg = Number(tick.dataset.bearing);
+        const delta = Math.min(
+          Math.abs(deg - tickDeg) % 360,
+          360 - (Math.abs(deg - tickDeg) % 360),
+        );
+        tick.classList.toggle('major', delta <= 22);
+      }
+    }
+    const c = cardinal(p.yaw);
+    const label = `${c.long} ${Math.round(deg)}°`;
+    if (el.compassText && label !== lastCompassText) {
+      lastCompassText = label;
+      el.compassText.textContent = label;
+    }
+  }
 
   let lastKillfeedKey = '';
   const teamKeys = { A: '', B: '' };
@@ -179,8 +364,64 @@ export function createHud() {
 
       // death overlay
       const dead = !p.playerAlive && (p.phase === 'live' || p.phase === 'round_end');
-      toggleClass(el.deathOverlay, 'hidden', !dead);
-      if (dead) setText(el.deathSub, p.phase === 'round_end' ? 'Raund bitti' : 'Takımın için izliyorsun');
+      // The report and the killcam are mutually exclusive: the replay plays
+      // first, then the report explains it. Showing both at once put a large
+      // "ELENDİN" across the middle of the killcam, hiding the exact frame the
+      // player wants to see.
+      const inKillcam = Boolean(p.killcam && p.killcam.playing);
+      toggleClass(el.deathOverlay, 'hidden', !dead || inKillcam);
+      if (dead && !inKillcam) {
+        // The report. Filled from `deathInfo`, which the game builds on the
+        // frame the player dies; the fallback text keeps the screen coherent
+        // when a round ends before the report arrives.
+        const info = p.deathInfo;
+        if (info && info.killer) {
+          setText(el.deathKiller, info.killer.name);
+          toggleClass(el.deathHeadshot, 'hidden', !info.killer.headshot);
+          const bits = [];
+          if (info.killer.weapon) bits.push(info.killer.weapon);
+          if (info.killer.distance) bits.push(`${Math.round(info.killer.distance)} m`);
+          if (info.killer.killerHealth > 0) bits.push(`katilin canı ${info.killer.killerHealth}`);
+          setText(el.deathDetail, bits.join(' · '));
+          setText(
+            el.deathSub,
+            info.teammatesAlive > 0
+              ? `Takımından ${info.teammatesAlive} kişi ayakta`
+              : 'Takımda kimse kalmadı',
+          );
+        } else {
+          setText(el.deathKiller, '—');
+          toggleClass(el.deathHeadshot, 'hidden', true);
+          setText(el.deathDetail, '');
+          setText(el.deathSub, p.phase === 'round_end' ? 'Raund bitti' : 'Takımın için izliyorsun');
+        }
+      }
+
+      // Killcam letterbox + caption. The bars tell the player they are watching
+      // a replay rather than playing, which is the difference between "I died"
+      // and "the game froze".
+      const kc = p.killcam;
+      toggleClass(el.killcamBar, 'hidden', !inKillcam);
+      if (kc && inKillcam) {
+        setText(el.killcamName, kc.killerName || '—');
+        el.killcamFill.style.transform = `scaleX(${Math.max(0, Math.min(1, kc.progress)).toFixed(3)})`;
+      }
+
+      // Spectator bar: only while dead and only once the death report has had
+      // its moment. Showing both at once crowds the screen at the exact time
+      // the player is trying to work out what happened.
+      const spectating = dead && p.spectate && p.spectate.mode !== 'none';
+      const showBar = spectating && !inKillcam && (!p.deathInfo || p.deathInfo.age > 1.4);
+      toggleClass(el.spectateBar, 'hidden', !showBar);
+      if (showBar) {
+        if (p.spectate.mode === 'free') {
+          setText(el.spectateName, 'SERBEST KAMERA');
+          setText(el.spectateMode, '');
+        } else {
+          setText(el.spectateName, p.spectate.targetName || '—');
+          setText(el.spectateMode, '');
+        }
+      }
 
       // killfeed
       const key = p.killfeed.map((k) => k.text + k.team).join('|');
@@ -208,6 +449,13 @@ export function createHud() {
       }
 
       setText(el.diffTag, p.difficulty.toUpperCase());
+
+      // tactical map + compass
+      drawMinimap(p);
+      drawCompass(p);
+      if (p.playerPos) {
+        setText(el.minimapLane, locationLabel(p.playerPos.x, p.playerPos.z));
+      }
       return this;
     },
     setFps(fps) {

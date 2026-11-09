@@ -37,7 +37,7 @@ export function resolveDamage({ health, armor, damage, headshot = false, headMul
 }
 
 /** Is a shot from `attackerTeam` allowed to hurt `victimTeam`? */
-export function isFriendly(attackerTeam, victimTeam) {
+function isFriendly(attackerTeam, victimTeam) {
   return attackerTeam === victimTeam;
 }
 
