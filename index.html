@@ -152,8 +152,15 @@
 
         <div id="damage-vignette" class="damage-vignette" aria-hidden="true"></div>
         <div id="damage-dir" class="damage-dir" aria-hidden="true"></div>
-        <div id="death-overlay" class="death-overlay hidden">
+        <!-- Death report: who killed you, with what, from where. Before this
+             existed the screen simply froze with no explanation at all. -->
+        <div id="death-overlay" class="death-overlay hidden" aria-live="polite" aria-atomic="true">
           <div class="death-title">ELENDİN</div>
+          <div class="death-by">
+            <span id="death-killer">—</span>
+            <span id="death-headshot" class="death-badge hidden">KAFA</span>
+          </div>
+          <div id="death-detail" class="death-detail"></div>
           <div id="death-sub" class="death-sub">Raund devam ediyor…</div>
         </div>
         <div id="fps" class="fps" aria-hidden="true">60 FPS</div>
@@ -331,6 +338,17 @@
             <button class="btn" data-action="menu">ANA MENÜ</button>
           </div>
         </div>
+      </div>
+
+      <!-- Spectator bar. Says who you are watching and how to change it. -->
+      <div id="spectate-bar" class="spectate-bar hidden" role="status">
+        <span class="spectate-label">İZLİYORSUN</span>
+        <span id="spectate-name" class="spectate-name">—</span>
+        <span id="spectate-mode" class="spectate-mode"></span>
+        <span class="spectate-keys">
+          <kbd>Q</kbd><kbd>E</kbd> değiştir
+          <kbd>A</kbd><kbd>D</kbd> serbest kamera
+        </span>
       </div>
 
       <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>

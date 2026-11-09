@@ -547,10 +547,10 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 213 headless test |
+| `npm test` | 282 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
-| `npm run visual` | Gerçek Chromium'da oyunu açar: 27 adım + nişangah/girdi/pozlama/harita/kariyer/çarpma ölçümü (§10b) |
+| `npm run visual` | Gerçek Chromium'da oyunu açar: 33 adım + nişangah/girdi/pozlama/harita/kariyer/çarpma/ölüm ölçümü (§10b) |
 | `npm run visual:setup` | Görsel test tarayıcısını kurar (`.playwright/`, ~200 MB, tek seferlik) |
 | `npm run audio` | Her sesi çevrimdışı render edip ölçer: tepe/RMS/uzunluk/merkez frekans (§10c) |
 | `npm run audio:live` | Oyunu açar, gerçek bir tur oynar ve mikserin ne çaldığını raporlar (§10c) |
@@ -827,6 +827,50 @@ Sandbox ~2 FPS çiziyor, yani 0.55 saniyelik bir animasyon iki kare arasına dü
 monoton mu, ceset zamanında kalkıyor mu, diriliş pozu sıfırlıyor mu.
 
 **Dürüst sınır:** izin *görünür* olduğunu ekran görüntüsüyle doğruladım. *İyi göründüğünü* değil.
+
+
+### 10g. Ölüm ekranı, seyirci ve takım arkadaşını devralma
+
+Ölünce hiçbir şey olmuyordu. `onPlayerDeath` input'u sıfırlıyor ve duruyordu: kamera olduğu yerde donuyor,
+ekranda tek kelime yok, kimin öldürdüğünü öğrenmenin hiçbir yolu yok. Raundun kalanına kadar — ki bu bir
+dakikaya kadar çıkabilir — hareketsiz bir duvara bakıyordun.
+
+**Ölüm raporu.** Kim, hangi silahla, kaç metreden, kafa mı, katilin canı ne kadar. Bu bilgi `death` olayında
+yoktu (o yalnızca öleni taşıyor); `registerDamage` içinde kaydediliyor, çünkü iki aktör de orada elde.
+
+**Seyirci.** Ölür ölmez kamera canlı takım arkadaşına geçiyor — üçüncü şahıs, arkadan. **Q/E** ile takım
+arkadaşları arasında geziniyorsun. Son arkadaşın da ölürse kamera serbest kalıyor (WASD ile uçarsın) — çünkü
+yoksa yine donmuş bir kareye bakıyordun.
+
+**Devralma (CS2'deki gibi).** İzlediğin takım arkadaşını **F** ile devralıyorsun: o artık sen oluyorsun,
+normal şekilde oynuyorsun. Bıraktığın gövdeye yeni bir bot beyni veriliyor, böylece açıkta donup kalmıyor.
+
+#### Bu neden "sadece bir kamera değişikliği" değil
+
+Devralma, oyunda **oyuncunun kim olduğunu değiştiren tek özellik.** Bu yüzden değişmezler test ediliyor:
+
+- Aynı anda **tek** aktör oyuncu olabilir. İki bayrak açık kalırsa skor tablosu iki ismi vurgular ve
+  hangi gövdeyi kontrol ettiğin belirsizleşir.
+- Sürdüğün aktörün **beyninin olmaması** gerekir. Beyin kalırsa bot seninle aynı gövde için kavga eder ve
+  sen her strafe'de kontrolü kaybedersin.
+- Bıraktığın gövde **geçerli bir raund üyesi olarak kalmalı** — kaybolmamalı, gölgen gibi peşinde
+  koşmamalı.
+
+#### Testlerin bulduğu gerçek hata
+
+Ölüm raporu ekranda boş görünüyordu. Sebep: `deathInfo` alanları **`hudState` yerine `gameSnapshot`'a**
+eklenmişti — yani hata ayıklama anlık görüntüsüne, HUD'un okuduğu yere değil. Saf yardımcı fonksiyonların
+45 testi bunu yakalamadı, çünkü hepsi geçiyordu; değerler sadece HUD'a ulaşmıyordu. Ders: **saf mantık
+testleri, kablolama hatalarını yakalamaz.** Bu yüzden bu turdan sonra `hudState`'in sözleşmesini doğrulayan
+6 test eklendi.
+
+#### Dürüst sınırlar
+
+- **Killcam kaydediliyor ama oynatılmıyor.** Tampon dolu, örnekleme test edildi, ama kamera geçişi çalışmıyor
+  — `updateSpectate` içindeki oynatma dalı yazıldı fakat sahne görüntüsüne bağlanmadı. Söylemem gereken
+  şey: bu kısım yarım.
+- **Devralınan botun nişan alması** kendi becerin, ama botun görüş açısı ve duruşu devraldığın yerden
+  geliyor; bu bir hile değil, CS2'deki davranışın aynısı.
 
 ## 11. Lisans / varlıklar
 

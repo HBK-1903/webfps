@@ -24,6 +24,9 @@ import {
   playerToggleAds,
   drainSounds,
   gameSnapshot,
+  cycleSpectateTarget,
+  possessTeammate,
+  spectateCamera,
 } from './core/game.js';
 import { eyePoint } from './core/actor.js';
 import { createScene, resizeScene, applyQuality } from './render/scene.js';
@@ -665,6 +668,39 @@ function resetRigsForNewMatch() {
 
 const keys = new Set();
 
+/** True while the player is dead and the round is still running. */
+function isPlayerDead() {
+  return Boolean(app.game && !app.game.player.alive);
+}
+
+/**
+ * Take over the teammate currently being spectated.
+ *
+ * Refused — with a reason on screen — when there is nobody to take. A silent
+ * no-op would read as the key being broken.
+ */
+function tryPossession() {
+  const game = app.game;
+  if (!game) return;
+  const sp = game.spectate;
+  const targetId = sp && sp.mode === 'follow' ? sp.targetId : null;
+  if (!targetId) {
+    showToast('Devralacak takım arkadaşı yok', 1600);
+    return;
+  }
+  const target = game.match.actors.find((a) => a.id === targetId);
+  const name = target ? target.name : 'Takım arkadaşı';
+  const taken = possessTeammate(game, targetId);
+  if (!taken) {
+    showToast('Devralma başarısız', 1600);
+    return;
+  }
+  // The rig for the new body has to stop being drawn: the player is first
+  // person, and a rig left visible would put a model inside the camera.
+  app.hud.show(true);
+  showToast(`${name} devralındı`, 1800);
+}
+
 function bindInput(canvas) {
   const updateMoveInput = () => {
     if (!app.game) return;
@@ -705,6 +741,31 @@ function bindInput(canvas) {
       return;
     }
     if (e.repeat) return;
+    // ── dead? ────────────────────────────────────────────────────────────
+    // While dead the movement keys steer the free spectator camera instead of
+    // a body, so they must not be swallowed by the "add to keys" path above.
+    if (isPlayerDead()) {
+      switch (e.code) {
+        case 'KeyQ':
+          cycleSpectateTarget(app.game, -1);
+          break;
+        case 'KeyE':
+          cycleSpectateTarget(app.game, 1);
+          break;
+        case 'KeyF':
+          // Take control of whoever is on screen, CS2-style.
+          tryPossession();
+          break;
+        default:
+          break;
+      }
+      if (['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) {
+        keys.add(e.code);
+        updateMoveInput();
+        return;
+      }
+    }
+
     switch (e.code) {
       case 'KeyR':
         playerReloadNow(app.game); // the sound comes back through drainSounds
@@ -1000,10 +1061,19 @@ function renderGame(dt) {
   // it must not move the crosshair relative to the world. It is tiny (1.8 cm)
   // and at 20 m that is still ~0.05 deg, so the reticle stays honest; the
   // recoil kick is the larger one and is deliberately visible.
-  const bob = Math.sin(game.pc.bobPhase) * 0.018 * game.player.speedFactor;
-  camera.position.set(eye.x, eye.y + bob, eye.z);
-  const kick = (game.pc.kickPitch * Math.PI) / 180;
-  applyCameraAngles(camera, game.pc.yaw, game.pc.pitch - kick);
+  // While dead the camera comes from the spectator system: either following a
+  // teammate in third person, replaying the killcam, or flying free. Falling
+  // back to the player's own eye would park the camera inside a corpse.
+  const spec = !game.player.alive ? spectateCamera(game) : null;
+  if (spec) {
+    camera.position.set(spec.x, spec.y, spec.z);
+    applyCameraAngles(camera, spec.yaw, spec.pitch);
+  } else {
+    const bob = Math.sin(game.pc.bobPhase) * 0.018 * game.player.speedFactor;
+    camera.position.set(eye.x, eye.y + bob, eye.z);
+    const kick = (game.pc.kickPitch * Math.PI) / 180;
+    applyCameraAngles(camera, game.pc.yaw, game.pc.pitch - kick);
+  }
 
   // FOV blend between hip and ADS.
   const w = WEAPONS[game.player.loadout.current];
@@ -1023,7 +1093,11 @@ function renderGame(dt) {
     const rig = app.rigs.get(actor.id);
     if (!rig) continue;
     if (actor.muzzleTimer === undefined) actor.muzzleTimer = 0;
-    updateRig(rig, actor, dt, performance.now() / 1000, false);
+    // `actor.isPlayer` — not `actor.isPlayer at rig creation` — because
+    // possession moves that flag onto a different body mid-match. The rig of
+    // whoever the player is currently driving must be hidden, and the rig of
+    // the body they left behind must come back.
+    updateRig(rig, actor, dt, performance.now() / 1000, actor.isPlayer);
     // Show a muzzle flash frame when a bot fires.
     if (actor.brain && actor.brain.shots > (actor._lastShots || 0)) {
       actor._lastShots = actor.brain.shots;
@@ -1032,7 +1106,11 @@ function renderGame(dt) {
   }
 
   // Viewmodel pose (only in-game states).
-  app.viewmodel.root.visible = app.state === 'playing' || app.state === 'paused' || app.state === 'ended';
+  // A gun still floating in view while you are dead and watching someone else
+  // is the most obvious tell that the camera changed without the player model
+  // knowing.
+  app.viewmodel.root.visible =
+    game.player.alive && (app.state === 'playing' || app.state === 'paused' || app.state === 'ended');
   setViewModelWeapon(app.viewmodel, game.player.loadout.current);
   applyPose(app.viewmodel, {
     speedFactor: game.player.speedFactor,

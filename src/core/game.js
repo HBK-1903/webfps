@@ -3,8 +3,9 @@
 // pure consumer of this state, which is what makes the whole game testable.
 
 import { PLAYER, MATCH, DIFFICULTY } from './config.js';
-import { MAP_AABBS } from './map.js';
+import { MAP_AABBS, MAP } from './map.js';
 import { NavGrid } from './navgrid.js';
+import { raycastBoxes } from './collision.js';
 import { createMatch, startMatch, updateMatch, matchSnapshot, drainEvents, aliveCount, playerActor, registerDamage, PHASE } from './match.js';
 import { createPlayerController, updatePlayer, playerTryFire, playerReload, playerSwitch, playerReleaseTrigger, addLook, stopPlayerWeapon } from './player.js';
 import { createBrain, createCoordinator, assignLanes, updateBot, BOT_STATE, refreshHuntZones } from './bot.js';
@@ -13,6 +14,21 @@ import { eyePoint } from './actor.js';
 import { notifyHit, hearSound, canSee } from './bot.js';
 // Pure geometry, no THREE and no DOM: safe to import from the core layer.
 import { faceNormal, sparkBurst, offsetAlong } from '../render/impact.js';
+import {
+  createKillcam,
+  recordKillcam,
+  KILLCAM_SECONDS,
+  deathReport,
+  spectateCandidates,
+  cycleSpectate,
+  clampCamera,
+  spectateEye,
+  cameraOccluded,
+  freeCameraStep,
+  deathFade,
+  sampleKillcam,
+  lerpAngle,
+} from './deathcam.js';
 
 /**
  * Shortest distance from point `p` to the segment a-b, in the xz plane.
@@ -71,6 +87,9 @@ export function createGame({ difficulty = 'normal', seed = 12345, grid = null } 
     player,
     pc,
     rng,
+    // Remembered so a teammate handed back to a brain gets a deterministic RNG
+    // rather than reseeding from Math.random.
+    seedForBrains: seed,
     paused: false,
     started: false,
     fx: createFxState(),
@@ -87,6 +106,21 @@ export function createGame({ difficulty = 'normal', seed = 12345, grid = null } 
     matchStats: { shots: 0, hits: 0, headshots: 0, damageDealt: 0 },
     onSound: null,
     deathHandled: false,
+    // ── death / spectator ──────────────────────────────────────────────────
+    // `deathInfo` is filled the frame the player dies and drives the death
+    // report. `spectate` holds the follow camera; `killcam` is a rolling
+    // buffer of the player's own view, replayed from the killer's side.
+    deathInfo: null,
+    deathAt: 0,
+    spectate: {
+      mode: 'none', // 'none' | 'follow' | 'free'
+      targetId: null,
+      locked: false,
+      cam: null,
+      yaw: 0,
+      pitch: 0,
+    },
+    killcam: createKillcam(),
     // What the player's side currently knows about enemy positions. Deliberately
     // *not* a mirror of `match.actors`: the minimap reads this, and if it read
     // the actors directly it would reveal every enemy on the map regardless of
@@ -105,6 +139,19 @@ export function createGame({ difficulty = 'normal', seed = 12345, grid = null } 
 // a hundred extra muzzle flashes is not worth a growing draw call.
 const MARKS_MAX = 96;
 const SPARKS_MAX = 160;
+
+// Where the spectator camera is allowed to go. Derived from the map rather than
+// hard-coded, and given headroom above the walls so a free camera can look down
+// over the lanes without leaving the level.
+const SPECTATE_BOUNDS = {
+  minX: MAP.bounds.minX,
+  maxX: MAP.bounds.maxX,
+  minY: 0.4,
+  maxY: 14,
+  minZ: MAP.bounds.minZ,
+  maxZ: MAP.bounds.maxZ,
+  margin: 0.5,
+};
 
 export function createFxState() {
   return {
@@ -246,8 +293,12 @@ export function updateGame(game, dtRaw) {
 
   if (match.phase === PHASE.LIVE) {
     // --- player -------------------------------------------------------
+    // While dead the controller is not stepped: it would keep applying
+    // movement to a corpse. The spectator camera takes over instead, and the
+    // renderer reads `spectateCamera()`.
     updatePlayer(game.pc, game.input, { boxes: MAP_AABBS, dt, advanceTime: true });
     game.pc.ads = game.input.ads && game.player.alive;
+    if (!game.player.alive) updateSpectate(game, dt);
     // Recoil: transfer weapon recoil into the visual camera kick.
     const w = activeWeapon(game.player.loadout);
     if (w.recoilPitch !== 0) {
@@ -333,6 +384,11 @@ export function updateGame(game, dtRaw) {
     // BRAVO's new positions every tick while BRAVO sees stale ones, which shows
     // up as a measurable side bias over thousands of ticks.
     const bots = [];
+    // `bot.brain` is the filter, not `!isPlayer`: the actor the player is
+    // currently driving has had its brain detached, and the body it was
+    // transferred out of has a fresh one. Keeping `isPlayer` out of this test
+    // means possession works without special-casing, and a teammate can never
+    // be simulated and controlled at the same time.
     for (const bot of match.actors) if (bot.brain && bot.alive) bots.push(bot);
     const flip = match.actors.length > 0 && Math.floor(match.time * 60) % 2 === 0;
     if (flip) bots.reverse();
@@ -422,6 +478,21 @@ export function updateGame(game, dtRaw) {
     }
   }
 
+  // --- killcam ---------------------------------------------------------
+  // Recorded every frame while alive, from the player's own eyes. The replay
+  // runs from the killer's position, and a buffer that only started at the
+  // moment of death would have nothing to show.
+  if (game.player.alive) {
+    const eye = eyePoint(game.player);
+    recordKillcam(game.killcam, match.time, {
+      x: eye.x,
+      y: eye.y,
+      z: eye.z,
+      yaw: game.pc.yaw,
+      pitch: game.pc.pitch,
+    });
+  }
+
   // --- feedback / bookkeeping -----------------------------------------
   decayFx(fx, dt);
   pruneContacts(game);
@@ -443,6 +514,14 @@ export function updateGame(game, dtRaw) {
       game.coordinator.hot.length = 0;
       game.coordinator.hunt = { A: null, B: null };
       game.stats = { shots: 0, hits: 0, headshots: 0, damageDealt: 0 };
+      // New round: everyone is alive again, so drop the death report and the
+      // spectator camera. Forgetting this leaves the camera detached in a
+      // respawned round, where the player can move but cannot see.
+      game.deathInfo = null;
+      game.spectate.mode = 'none';
+      game.spectate.cam = null;
+      game.spectate.targetId = null;
+      game.killcam.frames.length = 0;
     } else if (e.type === 'round_end') {
       fx.roundBanner = null;
       pushSound(fx, { type: e.winner === 'A' ? 'round_win' : 'round_loss' });
@@ -458,6 +537,13 @@ export function updateGame(game, dtRaw) {
   return { phaseChanged };
 }
 
+/**
+ * The player just died.
+ *
+ * This used to zero the input and stop. Nothing was shown, the camera stayed
+ * frozen where it was, and there was no way to learn who had killed you or
+ * from where — for the rest of the round, which can be most of a minute.
+ */
 function onPlayerDeath(game) {
   if (game.deathHandled) return;
   game.deathHandled = true;
@@ -465,6 +551,289 @@ function onPlayerDeath(game) {
   game.input.forward = 0;
   game.input.right = 0;
   stopPlayerWeapon(game.pc);
+
+  const { match } = game;
+  const d = match.lastDeath && match.lastDeath.victimId === game.player.id ? match.lastDeath : null;
+  const killer = d ? match.actors.find((a) => a.id === d.attackerId) : null;
+  const teammates = match.actors.filter((a) => a.team === game.player.team && !a.isPlayer);
+
+  game.deathAt = match.time;
+  game.deathInfo = {
+    ...deathReport({
+      attacker: killer || (d ? { id: d.attackerId, name: d.attackerName, team: null, health: 0 } : null),
+      weapon: d ? d.weapon : '',
+      headshot: d ? d.headshot : false,
+      distance: d ? d.distance : 0,
+      round: match.round,
+      remaining: teammates,
+    }),
+    // The killcam only replays when there is actually something to replay.
+    killerId: d ? d.attackerId : null,
+    // Seconds since the player died; advanced by the caller so the UI can time
+    // the report -> spectate transition without its own clock.
+    age: 0,
+  };
+  // Enter spectate immediately so the camera never sits dead on the corpse.
+  // The report renders on top of it; there is no reason to stare at the floor
+  // while reading who shot you.
+  enterSpectate(game);
+
+  // ── killcam replay ──────────────────────────────────────────────────────
+  // Replay the seconds before the shot from the killer's side. Positions come
+  // from the buffer of the player's own camera, so the replay shows the real
+  // approach rather than a reconstruction.
+  const kc = game.killcam;
+  game.killcamPlayback = null;
+  if (killer && kc.frames.length > 1) {
+    const start = Math.max(kc.frames[0].t, match.time - KILLCAM_SECONDS);
+    game.killcamPlayback = {
+      start,
+      end: match.time,
+      t: start,
+      // A camera fixed at the killer's eyes, aimed at where the player was
+      // when the shot landed.
+      from: { x: killer.x, y: eyePoint(killer).y, z: killer.z },
+      to: { x: game.player.x, y: eyePoint(game.player).y, z: game.player.z },
+      done: false,
+    };
+  }
+}
+
+/**
+ * Choose what the camera follows after death.
+ *
+ * Free camera when the whole team is down (`nobody left to follow`), otherwise
+ * the first living teammate. This runs on death and again whenever the current
+ * spectate target dies.
+ */
+function enterSpectate(game) {
+  const { match } = game;
+  const candidates = spectateCandidates({
+    actors: match.actors,
+    playerId: game.player.id,
+    team: game.player.team,
+  });
+  const sp = game.spectate;
+  if (!candidates.length) {
+    // Nobody left. Detach into a free camera at the corpse's eye height rather
+    // than leaving the camera inside the body.
+    sp.mode = 'free';
+    sp.targetId = null;
+    sp.locked = false;
+    sp.cam = sp.cam || {
+      x: game.player.x,
+      y: eyePoint(game.player).y + 0.4,
+      z: game.player.z,
+      yaw: game.pc.yaw,
+      pitch: game.pc.pitch,
+    };
+    return;
+  }
+  sp.mode = 'follow';
+  sp.targetId = candidates[0].id;
+  sp.locked = false;
+}
+
+/** Q / E: step the spectate target. Ignored once the camera is free-camming. */
+export function cycleSpectateTarget(game, dir) {
+  const sp = game.spectate;
+  if (!sp || sp.mode === 'none') return null;
+  if (sp.mode === 'free') {
+    // Once the camera has detached there is nothing to cycle between; take the
+    // controls back out of free mode if a teammate is somehow still alive.
+    const candidates = spectateCandidates({
+      actors: game.match.actors,
+      playerId: game.player.id,
+      team: game.player.team,
+    });
+    if (!candidates.length) return null;
+    sp.mode = 'follow';
+    sp.locked = false;
+    sp.targetId = cycleSpectate(candidates, null, dir).id;
+    return sp.targetId;
+  }
+  const candidates = spectateCandidates({
+    actors: game.match.actors,
+    playerId: game.player.id,
+    team: game.player.team,
+  });
+  const next = cycleSpectate(candidates, sp.targetId, dir);
+  if (next) {
+    sp.targetId = next.id;
+    sp.locked = false;
+  }
+  return next ? next.id : null;
+}
+
+/**
+ * Advance the spectator camera. Called every tick while the player is dead.
+ *
+ * Returns nothing; it writes `game.camera` which the renderer reads. Keeping
+ * the camera math in the core means the tests can drive it without a renderer.
+ */
+function updateSpectate(game, dt) {
+  const sp = game.spectate;
+  if (!sp || sp.mode === 'none') return;
+  const { match } = game;
+
+  if (game.deathInfo) game.deathInfo.age += dt;
+
+  // Killcam runs first and briefly: while it is playing the camera is the
+  // killer's, not the spectator's.
+  const kb = game.killcamPlayback;
+  if (kb && !kb.done) {
+    kb.t += dt;
+    if (kb.t >= kb.end) {
+      kb.done = true;
+    } else {
+      const sample = sampleKillcam(game.killcam, kb.t);
+      if (sample) sp.cam = { x: sample.x, y: sample.y, z: sample.z, yaw: sample.yaw, pitch: sample.pitch };
+      return;
+    }
+  }
+
+  if (sp.mode === 'follow') {
+    const target = match.actors.find((a) => a.id === sp.targetId);
+    if (!target || !target.alive) {
+      // The teammate we were watching just died. Move on rather than staring
+      // at their corpse from a camera that has stopped responding.
+      const candidates = spectateCandidates({
+        actors: match.actors,
+        playerId: game.player.id,
+        team: game.player.team,
+      });
+      const next = cycleSpectate(candidates, sp.targetId, 1);
+      if (next) {
+        sp.targetId = next.id;
+        sp.locked = false;
+      } else {
+        enterSpectate(game);
+      }
+      return;
+    }
+
+    const eye = spectateEye(target);
+    // Keep the camera out of walls: if the pulled-back position is behind
+    // geometry, walk it toward the target until the view is clear.
+    let cam = clampCamera(eye.x, eye.y, eye.z, SPECTATE_BOUNDS);
+    if (cameraOccluded(cam, { x: target.x, y: eye.y, z: target.z }, (ox, oy, oz, dx, dy, dz, max) => raycastBoxes(ox, oy, oz, dx, dy, dz, MAP_AABBS, max))) {
+      // Two fallbacks, cheapest first: half the distance, then the actor's own
+      // head. A camera that never clips is worth more than a perfect angle.
+      const half = spectateEye(target, { back: 1.2, up: 0.25 });
+      const halfCam = clampCamera(half.x, half.y, half.z, SPECTATE_BOUNDS);
+      const blocked = cameraOccluded(halfCam, { x: target.x, y: half.y, z: target.z }, (ox, oy, oz, dx, dy, dz, max) => raycastBoxes(ox, oy, oz, dx, dy, dz, MAP_AABBS, max));
+      cam = blocked ? { x: target.x, y: eyePoint(target).y, z: target.z } : halfCam;
+    }
+
+    // Smooth the camera rather than snapping: the target moves, and a rigid
+    // follow at 60 fps reads as a jitter.
+    if (!sp.cam) sp.cam = { ...cam, yaw: target.yaw, pitch: target.pitch };
+    const k = Math.min(1, 8 * dt);
+    sp.cam.x += (cam.x - sp.cam.x) * k;
+    sp.cam.y += (cam.y - sp.cam.y) * k;
+    sp.cam.z += (cam.z - sp.cam.z) * k;
+    // Look where the *target* is looking, smoothed the short way round.
+    sp.cam.yaw = lerpAngle(sp.cam.yaw, target.yaw, k);
+    sp.cam.pitch += (target.pitch - sp.cam.pitch) * k;
+
+    // Pressing a movement key detaches into free flight.
+    if (wantsFreeCam(game.input)) {
+      sp.mode = 'free';
+      sp.locked = false;
+    }
+  }
+
+  if (sp.mode === 'free') {
+    const step = freeCameraStep(sp.cam, game.input, dt);
+    const clamped = clampCamera(step.x, step.y, step.z, SPECTATE_BOUNDS);
+    sp.cam = { ...sp.cam, x: clamped.x, y: clamped.y, z: clamped.z };
+    // Look is applied by the normal mouse path into sp.yaw / sp.pitch.
+    sp.cam.yaw = sp.yaw;
+    sp.cam.pitch = sp.pitch;
+  }
+}
+
+function wantsFreeCam(input) {
+  return Boolean(input.forward || input.right || input.up || input.down);
+}
+
+/**
+ * Take control of a living teammate, CS2-style.
+ *
+ * This is the one place the game changes *who the player is*. It is written as
+ * an explicit transfer rather than a swap so the invariants are obvious:
+ *
+ *   - The teammate must be alive, on the player's team, and not the player.
+ *   - Their brain is detached: a bot that keeps thinking would fight the
+ *     controller for the same actor, and the player would lose control of
+ *     their own movement every time the bot decided to strafe.
+ *   - The controller's actor is repointed, so every existing call site —
+ *     `game.pc`, `game.player`, firing, movement — keeps working unchanged.
+ *   - The body you left behind is marked so it cannot be re-entered as a
+ *     teammate later, and it is removed from the round's alive count only by
+ *     the normal death rules, not by this.
+ *
+ * Returns the new actor, or null if the transfer was refused.
+ */
+export function possessTeammate(game, actorId) {
+  const { match } = game;
+  const from = game.player;
+  const target = match.actors.find((a) => a.id === actorId);
+  if (!target) return null;
+  if (target === from) return null;
+  if (!target.alive) return null;
+  if (target.team !== from.team) return null;
+  if (target.isPlayer) return null;
+
+  // Detach the brain. The controller's own state is rebuilt around the new
+  // body so the camera does not inherit the previous actor's momentum.
+  target.brain = null;
+  target.isPlayer = true;
+  target.name = from.name + ' (devraldı)';
+
+  // The old body stops being the player's, keeps its brain-less stillness, and
+  // is marked so the minimap and the team list still show it honestly.
+  from.isPlayer = false;
+  from.possessedFrom = true;
+  // A body that was being driven by the player has no brain of its own. Handing
+  // it a fresh one keeps it from standing frozen in the open — but only if it
+  // is still alive to act. Its RNG is seeded from its id so the whole match
+  // stays reproducible.
+  if (from.alive) {
+    from.brain = createBrain(from, match.profile, {
+      rng: mulberry32(game.seedForBrains + from.id * 7919),
+      lane: 'mid',
+    });
+  }
+
+  game.player = target;
+  game.pc.actor = target;
+  // Rebuild the camera on the new body: keeping the old yaw would snap the view
+  // to wherever the previous actor happened to be facing.
+  game.pc.yaw = target.yaw;
+  game.pc.pitch = 0;
+  game.pc.kickPitch = 0;
+  game.pc.ads = false;
+  game.pc.adsBlend = 0;
+
+  // Stop spectating: the player is in control again.
+  game.spectate.mode = 'none';
+  game.spectate.cam = null;
+  game.spectate.targetId = null;
+  return target;
+}
+
+/** The camera transform the renderer should use while dead. */
+export function spectateCamera(game) {
+  const sp = game.spectate;
+  if (!sp || sp.mode === 'none' || !sp.cam) return null;
+  return {
+    x: sp.cam.x,
+    y: sp.cam.y,
+    z: sp.cam.z,
+    yaw: sp.cam.yaw,
+    pitch: sp.cam.pitch,
+  };
 }
 
 function alertBotsToSound(game, origin) {
@@ -608,6 +977,31 @@ export function hudState(game) {
     now: game.match.time,
     playerPos: { x: p.x, z: p.z },
     yaw: game.pc.yaw,
+    // ── death / spectator ────────────────────────────────────────────────
+    // These belong on the HUD state, not the debug snapshot: they drive the
+    // death report and the spectator bar, which are player-facing.
+    deathInfo: game.deathInfo,
+    deathFade: game.deathInfo ? deathFade(game.deathInfo.age, 0.45) : 0,
+    killcam: game.killcamPlayback
+      ? {
+          playing: !game.killcamPlayback.done,
+          progress: Math.max(
+            0,
+            Math.min(
+              1,
+              (game.killcamPlayback.t - game.killcamPlayback.start) /
+                Math.max(0.01, game.killcamPlayback.end - game.killcamPlayback.start),
+            ),
+          ),
+        }
+      : null,
+    spectate: {
+      mode: game.spectate.mode,
+      targetId: game.spectate.targetId,
+      targetName: game.spectate.targetId
+        ? (game.match.actors.find((a) => a.id === game.spectate.targetId) || {}).name || null
+        : null,
+    },
   };
 }
 

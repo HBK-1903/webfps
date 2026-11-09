@@ -872,3 +872,184 @@ kbd {
   background: rgba(79, 209, 197, 0.35);
   border-radius: 5px;
 }
+
+/* ── death report & spectator ───────────────────────────────────────────── */
+
+/* The death card sits above the spectator view but never blocks the mouse:
+   the player may already be steering the spectator camera when it appears. */
+.death-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 15;
+}
+
+.death-card {
+  min-width: min(420px, 88vw);
+  padding: 18px 26px 20px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(10, 16, 20, 0.94), rgba(8, 12, 16, 0.88));
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--danger);
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  animation: death-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes death-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+.death-kicker {
+  margin: 0 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.death-killer {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.death-badge {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: rgba(255, 215, 138, 0.16);
+  color: #ffd78a;
+  border: 1px solid rgba(255, 215, 138, 0.35);
+  font-weight: 700;
+  transform: translateY(-2px);
+}
+
+.death-detail {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.death-team {
+  margin: 10px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.spectate-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(8, 12, 16, 0.82);
+  backdrop-filter: blur(4px);
+  font-size: 12px;
+  z-index: 16;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.spectate-label {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+}
+
+.spectate-name { color: var(--accent); font-weight: 700; letter-spacing: 0.04em; }
+
+.spectate-mode { color: var(--text-dim); font-size: 11px; }
+
+.spectate-keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 10px;
+  border-left: 1px solid var(--line);
+  padding-left: 12px;
+}
+
+.spectate-keys kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 1px 4px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 620px) {
+  .spectate-keys { display: none; }
+}
+
+/* The death report sits on top of a spectator view of a teammate, so the text
+   has to hold its own against whatever is behind it: a bright vest, a lit wall,
+   the sky. A soft panel behind the block is the cheapest honest fix — the
+   earlier version put the killer's name straight over a teammate's backpack. */
+.death-by {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 20px;
+  border-radius: 8px;
+  background: rgba(6, 8, 10, 0.72);
+  backdrop-filter: blur(6px);
+  font-size: clamp(16px, 2.6vmin, 24px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #eef4f4;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+}
+
+.death-detail {
+  padding: 5px 16px;
+  border-radius: 6px;
+  background: rgba(6, 8, 10, 0.66);
+  backdrop-filter: blur(6px);
+  font-size: clamp(11px, 1.5vmin, 13px);
+  letter-spacing: 0.08em;
+  color: #b9cbcd;
+  font-variant-numeric: tabular-nums;
+  min-height: 1em;
+}
+
+/* The title is large enough to read on its own, but a shadow keeps it legible
+   over a bright sky without needing another panel. */
+.death-title {
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85), 0 0 3px rgba(0, 0, 0, 0.9);
+}
+
+.death-sub {
+  padding: 4px 14px;
+  border-radius: 6px;
+  background: rgba(6, 8, 10, 0.6);
+  color: #9db0b2;
+}

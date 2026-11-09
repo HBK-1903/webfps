@@ -644,7 +644,100 @@ async function main() {
     );
   }
 
-  // ── 14. console ───────────────────────────────────────────────────────────
+  // ── 14. death report & possession ─────────────────────────────────────────
+  // Three things can break here and all three are silent: the report renders
+  // empty (values never reach hudState), the spectator camera stays attached to
+  // the corpse, and possession leaves two actors marked as the player.
+  const death = await page.evaluate(async () => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    if (!app?.game) return { error: 'oyun yok' };
+    const g = app.game;
+    const { registerDamage } = await import('/src/core/match.js');
+    const foe = g.match.actors.find((a) => a.team !== g.player.team && a.alive);
+    if (!foe) return { error: 'düşman yok' };
+    foe.x = g.player.x + 8;
+    foe.z = g.player.z;
+    registerDamage(g.match, foe, g.player, {
+      healthLost: g.player.health,
+      headshot: true,
+      killed: true,
+    });
+    await new Promise((r) => setTimeout(r, 2500));
+    return {
+      killer: document.getElementById('death-killer')?.textContent || '',
+      detail: document.getElementById('death-detail')?.textContent || '',
+      headshot: !document.getElementById('death-headshot')?.classList.contains('hidden'),
+      spectateMode: g.spectate.mode,
+      spectateId: g.spectate.targetId,
+      playerId: g.player.id,
+      camY: g.spectate.cam ? g.spectate.cam.y : null,
+    };
+  });
+  measurements.death = death;
+  if (death.error) {
+    step('Ölüm raporu', false, death.error);
+  } else {
+    step('Ölüm raporu katili gösteriyor', death.killer.length > 0, death.killer);
+    step(
+      'Ölüm raporu silah ve mesafe gösteriyor',
+      /·/.test(death.detail),
+      death.detail || '(boş)',
+    );
+    step(
+      'Kamera cesetten ayrılıyor',
+      death.spectateMode !== 'none' && death.spectateId !== death.playerId && death.camY > 0.5,
+      `mod ${death.spectateMode}, hedef ${death.spectateId}, kamera y ${death.camY?.toFixed(2)}`,
+    );
+  }
+
+  // Q / E cycle between teammates.
+  const cycled = await page.evaluate(async () => {
+    const g = globalThis.__SIFIR_NOKTA__.game;
+    const before = g.spectate.targetId;
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' }));
+    await new Promise((r) => setTimeout(r, 400));
+    const afterE = g.spectate.targetId;
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
+    await new Promise((r) => setTimeout(r, 400));
+    const afterQ = g.spectate.targetId;
+    return { before, afterE, afterQ };
+  });
+  measurements.cycle = cycled;
+  step(
+    'Q/E seyirci hedefini değiştiriyor',
+    cycled.afterE !== cycled.before && cycled.afterQ === cycled.before,
+    `${cycled.before} → E ${cycled.afterE} → Q ${cycled.afterQ}`,
+  );
+
+  // Possession.
+  const taken = await page.evaluate(async () => {
+    const g = globalThis.__SIFIR_NOKTA__.game;
+    const beforeId = g.player.id;
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyF' }));
+    await new Promise((r) => setTimeout(r, 600));
+    const players = g.match.actors.filter((a) => a.isPlayer);
+    return {
+      beforeId,
+      afterId: g.player.id,
+      playerCount: players.length,
+      alive: g.player.alive,
+      hasBrain: Boolean(g.player.brain),
+      spectate: g.spectate.mode,
+    };
+  });
+  measurements.possess = taken;
+  step(
+    'Devralma oyuncuyu değiştiriyor',
+    taken.afterId !== taken.beforeId && taken.alive,
+    `${taken.beforeId} → ${taken.afterId}`,
+  );
+  step(
+    'Devralmadan sonra tek oyuncu var',
+    taken.playerCount === 1 && !taken.hasBrain,
+    `oyuncu ${taken.playerCount}, beyin ${taken.hasBrain ? 'var (hatalı)' : 'yok'}`,
+  );
+
+  // ── 15. console ───────────────────────────────────────────────────────────
   step('Konsol hatası yok', errors.length === 0, errors.length ? errors.slice(0, 2).join(' | ') : 'temiz');
 
   await browser.close();

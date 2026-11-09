@@ -44,6 +44,12 @@ export function createHud() {
     damageDir: $('damage-dir'),
     deathOverlay: $('death-overlay'),
     deathSub: $('death-sub'),
+    deathKiller: $('death-killer'),
+    deathDetail: $('death-detail'),
+    deathHeadshot: $('death-headshot'),
+    spectateBar: $('spectate-bar'),
+    spectateName: $('spectate-name'),
+    spectateMode: $('spectate-mode'),
     fps: $('fps'),
     diffTag: $('difficulty-tag'),
     minimap: $('minimap'),
@@ -356,7 +362,48 @@ export function createHud() {
       // death overlay
       const dead = !p.playerAlive && (p.phase === 'live' || p.phase === 'round_end');
       toggleClass(el.deathOverlay, 'hidden', !dead);
-      if (dead) setText(el.deathSub, p.phase === 'round_end' ? 'Raund bitti' : 'Takımın için izliyorsun');
+      if (dead) {
+        // The report. Filled from `deathInfo`, which the game builds on the
+        // frame the player dies; the fallback text keeps the screen coherent
+        // when a round ends before the report arrives.
+        const info = p.deathInfo;
+        if (info && info.killer) {
+          setText(el.deathKiller, info.killer.name);
+          toggleClass(el.deathHeadshot, 'hidden', !info.killer.headshot);
+          const bits = [];
+          if (info.killer.weapon) bits.push(info.killer.weapon);
+          if (info.killer.distance) bits.push(`${Math.round(info.killer.distance)} m`);
+          if (info.killer.killerHealth > 0) bits.push(`katilin canı ${info.killer.killerHealth}`);
+          setText(el.deathDetail, bits.join(' · '));
+          setText(
+            el.deathSub,
+            info.teammatesAlive > 0
+              ? `Takımından ${info.teammatesAlive} kişi ayakta`
+              : 'Takımda kimse kalmadı',
+          );
+        } else {
+          setText(el.deathKiller, '—');
+          toggleClass(el.deathHeadshot, 'hidden', true);
+          setText(el.deathDetail, '');
+          setText(el.deathSub, p.phase === 'round_end' ? 'Raund bitti' : 'Takımın için izliyorsun');
+        }
+      }
+
+      // Spectator bar: only while dead and only once the death report has had
+      // its moment. Showing both at once crowds the screen at the exact time
+      // the player is trying to work out what happened.
+      const spectating = dead && p.spectate && p.spectate.mode !== 'none';
+      const showBar = spectating && (!p.deathInfo || p.deathInfo.age > 1.4);
+      toggleClass(el.spectateBar, 'hidden', !showBar);
+      if (showBar) {
+        if (p.spectate.mode === 'free') {
+          setText(el.spectateName, 'SERBEST KAMERA');
+          setText(el.spectateMode, '');
+        } else {
+          setText(el.spectateName, p.spectate.targetName || '—');
+          setText(el.spectateMode, '');
+        }
+      }
 
       // killfeed
       const key = p.killfeed.map((k) => k.text + k.team).join('|');
