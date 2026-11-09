@@ -197,6 +197,9 @@ Hepsi `localStorage`'da saklanır ve yeniden açılışta korunur.
 - Tüm harita primitiflerden üretilir — üçüncü taraf asset yok, lisans sorunu yok.
 
 **Arayüz / ses**
+- Kariyer: maçlar arası kalıcı istatistikler (§10e) — galibiyet oranı, K/D, isabet trendi, zorluk bazında
+  ayrım, son 10 maç geçmişi, kişisel rekorlar. Bozuk kayıt dosyası oyunu asla çökertmez.
+- Vuruş geri bildirimi (§10f): duvarda kalan kurşun izleri, yüzeye göre yönelen kıvılcımlar, düşen ceset.
 - HUD: can, zırh, silah, şarjör/yedek, kendi takım listesi, canlı sayıları, skor, raund durumu,
   geri sayım, nişangâh (yayılmaya göre açılan), hitmarker, reload halkası, killfeed, hasar yönü,
   **taktik harita** (şerit bantları, takım arkadaşları, süresi dolan düşman temasları, konum etiketi)
@@ -544,10 +547,10 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 155 headless test |
+| `npm test` | 213 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
-| `npm run visual` | Gerçek Chromium'da oyunu açar: 22 adım + nişangah/girdi/pozlama/harita ölçümü (§10b) |
+| `npm run visual` | Gerçek Chromium'da oyunu açar: 27 adım + nişangah/girdi/pozlama/harita/kariyer/çarpma ölçümü (§10b) |
 | `npm run visual:setup` | Görsel test tarayıcısını kurar (`.playwright/`, ~200 MB, tek seferlik) |
 | `npm run audio` | Her sesi çevrimdışı render edip ölçer: tepe/RMS/uzunluk/merkez frekans (§10c) |
 | `npm run audio:live` | Oyunu açar, gerçek bir tur oynar ve mikserin ne çaldığını raporlar (§10c) |
@@ -758,6 +761,72 @@ Bu arada gerçek bir hata çıktı: aynı tick'te hem temas işaretlenip hem dü
 
 **Dürüst sınır:** haritanın *okunabilir* olduğunu ölçtüm (boş değil, yönü doğru). *Güzel* olduğunu ya da
 168 px'te yeterince rahat okunduğunu değil — o senin ekranına bakıyor.
+
+
+### 10e. Kariyer istatistikleri
+
+Bir maç bitiyordu, yedi sayı gösteriyordu, sonra her şey unutuluyordu. "Daha iyi oluyor muyum?" sorusunun
+cevabı yoktu, geçmiş yoktu, ve zorluk ayarının o maçtan başka bir anlamı yoktu.
+
+`src/core/career.js` saf bir birleştirme fonksiyonu + tek bir depolama adaptörü. İlginç kısım birleştirme
+olduğu için test edilebilir: **28 test**, çoğu mutlu yol değil **bozuk girdi** hakkında.
+
+- Maç, galibiyet/mağlubiyet/berabere, öldürme, ölüm, kafa, atış, isabet, hasar, raund, süre — ve
+  **zorluk bazında ayrı** sayaçlar.
+- Son **10 maç** geçmişi. Sınırsız bir günlük, localStorage'ın yazamaz hale gelmesinin en yaygın yoludur.
+- Okurken her şey doğrulanıyor: bu veri elle düzenlenebilir, kota hatasıyla yarıda kesilebilir, eski
+  sürümden kalmış olabilir, ya da tarayıcı erişimi tamamen engelleyebilir. Bozuk dosya "henüz kariyer yok"
+  durumuna düşer — asla çökmez, asla ekranda NaN göstermez, asla %100 üstü galibiyet oranı iddia edemez.
+- Değişmezler **onarılıyor**, gösterilmiyor: `isabet ≤ atış`, `kafa ≤ isabet`, `galibiyet ≤ maç`.
+
+#### Yol boyunca bulunan sessiz yalan
+
+`game.stats` her raund başında sıfırlanıyor. Yani maç sonu ekranındaki **"İsabet"** aslında *sadece son
+raundun* isabetiydi — son raundu iyi geçen herkesi sessizce pohpohluyordu. `matchStats` eklendi; yalnızca
+yeni maç başlarken sıfırlanıyor.
+
+Bu, kariyerin neden önemli olduğunu da gösteriyor: yanlış sayıyı kaydetmek, kaydetmemekten kötüdür.
+
+#### Ekranda bulunan üç hata
+
+1. `careerSummary` yalnızca oranları döndürüyordu, ham sayaçları değil. Sonuç: binlerce atışı olan bir
+   kariyerde K/D, isabet ve kafa isabeti **"—"** gösteriyordu. Birim testleri yakalamadı; tarayıcıda
+   gerçek bir kariyer yüklemek yakaladı.
+2. Kariyer paneli laptop ekranından uzundu ve hem üstten hem alttan taşıyordu — **başlık ve GERİ düğmesi
+   ikisi de erişilemezdi.** Ekran artık kaydırılıyor.
+3. Geçmiş satırları depolanmış veri üzerinde `h.kd.toFixed(2)` çağırıyordu; elle düzenlenmiş bir kayıt
+   tüm ekranı çizen döngünün içinde çökerdi.
+
+### 10f. Çarpma efektleri ve ölüm animasyonu
+
+Duvara sıkmak tek bir karenin çeyrek saniyede sönmesini üretiyordu ve geride hiçbir şey bırakmıyordu.
+Bir botu öldürmek cesedi aynı karede yok ediyordu. İkisinde de dünya hiçbir şey olmuş gibi davranmıyordu.
+
+**Kurşun izleri** iki katmanlı: açık renkli toz halkası + koyu çekirdek. Tek katman denendi ve **ekranda
+ölçüldü**: duvarlar zaten koyu mavi-gri olduğu için `0x14181c` bir leke tamamen görünmezdi. Halka, hasar
+olarak okunan şey.
+
+**Kıvılcımlar** oyun tick'inde simüle ediliyor, renderer'da değil — böylece yay oyun durumunun parçası ve
+bir test düştüklerini doğrulayabiliyor.
+
+#### Testlerin bulduğu iki gerçek hata
+
+1. **Zemine sıkınca kıvılcımlar aşağı uçuyordu.** Zemin yüzey normali aşağı bakar; onu harfi harfine
+   kullanmak kıvılcım patlamasının tamamını haritanın altına gömüyordu — yere sıkmak hiçbir şey yapmamış
+   gibi görünüyordu. Artık moloz, merminin girdiği yoldan geri çıkıyor.
+2. **Sönme eğrisi tersti.** `(1-t)²` hemen karartıp sonra söner; bir kıvılcımın gerçekten yaşadığı dört
+   karede bu, hiç parlak olmamış demektir. Artık `1-t²`.
+
+**Ölüm animasyonu:** 0.55 saniyede devrilme, uzuvlar gevşiyor, 4.5 saniye yerde kalıyor sonra bırakılıyor.
+Her ceset farklı yana devriliyor (`Math.random` değil, aktör kimliğinden türetilmiş, yani kare kare kararlı).
+
+#### Bu ekran görüntüsüyle kanıtlanamadı
+
+Sandbox ~2 FPS çiziyor, yani 0.55 saniyelik bir animasyon iki kare arasına düşüyor ve gövde yere
+**ışınlanmış** gibi görünüyor. Bu yüzden rig'i 60 fps'te açık bir saatle süren **10 test** yazıldı: düşüş
+monoton mu, ceset zamanında kalkıyor mu, diriliş pozu sıfırlıyor mu.
+
+**Dürüst sınır:** izin *görünür* olduğunu ekran görüntüsüyle doğruladım. *İyi göründüğünü* değil.
 
 ## 11. Lisans / varlıklar
 
