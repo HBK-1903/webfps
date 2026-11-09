@@ -166,6 +166,10 @@ function startMatchFlow(difficulty) {
 
   disposeGame();
   app.game = createGame({ difficulty, seed: (Math.random() * 1e9) | 0 });
+  // Settings are applied once at boot, before any game exists, so `applySettings`
+  // skips every game-scoped option (`if (app.game)`). Without this line a saved
+  // "screen shake off" was silently ignored and came back on at the first match.
+  app.game.shake = app.settings.shake;
   app.rigs.clear();
   for (const actor of app.game.match.actors) {
     if (actor.isPlayer) continue;

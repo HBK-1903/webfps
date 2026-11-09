@@ -25,7 +25,7 @@ export function createWeaponState(weaponId) {
   };
 }
 
-export function resetWeapon(state, weaponId) {
+function resetWeapon(state, weaponId) {
   const def = WEAPONS[weaponId];
   state.id = weaponId;
   state.def = def;
@@ -105,7 +105,7 @@ export function startReload(w) {
   return true;
 }
 
-export function finishReload(w) {
+function finishReload(w) {
   if (!w.reloading && w.reloadTimer > 0) return;
   const need = w.def.magSize - w.mag;
   const take = Math.min(need, w.reserve);
@@ -195,10 +195,10 @@ export function ammoInfo(loadout) {
   return { mag: w.mag, reserve: w.reserve, magSize: w.def.magSize, reloading: w.reloading, switching: w.switching, name: w.def.shortName };
 }
 
-export function degToRad(d) {
+function degToRad(d) {
   return (d * Math.PI) / 180;
 }
-export function clampPitch(p) {
+function clampPitch(p) {
   const lim = degToRad(89);
   return Math.max(-lim, Math.min(lim, p));
 }

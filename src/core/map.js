@@ -80,7 +80,7 @@ const LANDMARKS = [
 /** All boxes (visual + collision + occlusion share this one list). */
 export const MAP_BOXES = [...PERIMETER, ...LANDMARKS, ...expandQuarter(QUARTER)];
 
-export function boxToAABB(b) {
+function boxToAABB(b) {
   return {
     minX: b.x - b.w / 2,
     maxX: b.x + b.w / 2,

@@ -60,7 +60,6 @@ export function cardinal(yaw) {
 }
 
 /** All four, in order, for building the compass strip. */
-export const CARDINAL_POINTS = CARDINALS;
 
 /**
  * Which lane a z coordinate falls in.
@@ -85,7 +84,6 @@ export function laneAt(z) {
   return null;
 }
 
-export const LANES = LANE_CENTRES;
 
 /**
  * How long a contact stays on the map after it was last refreshed, in seconds.

@@ -160,7 +160,7 @@ const SPECTATE_BOUNDS = {
   margin: 0.5,
 };
 
-export function createFxState() {
+function createFxState() {
   return {
     tracers: [],
     // Brief flash at the impact point.
@@ -182,7 +182,7 @@ export function createFxState() {
   };
 }
 
-export function clearTransientFx(fx) {
+function clearTransientFx(fx) {
   fx.tracers.length = 0;
   fx.impacts.length = 0;
   // Marks are cleared with the rest: they belong to the map, and the map is
@@ -376,9 +376,9 @@ export function updateGame(game, dtRaw) {
           }
           pushSound(fx, { type: s.result.hit && s.result.hit.headshot ? 'headshot' : 'hit' });
         } else if (s.result.cast.type === 'wall') {
-          addImpact(fx, s.result.cast.point, s.result.cast.box);
+          addImpact(fx, s.result.cast.point, s.result.cast.box, game.rng);
         } else if (s.result.cast.type === 'friendly') {
-          addImpact(fx, s.result.cast.point, null);
+          addImpact(fx, s.result.cast.point, null, game.rng);
         }
         pushSound(fx, { type: 'shot', weapon: s.shot.weaponId });
         alertBotsToSound(game, s.origin);
@@ -443,7 +443,7 @@ export function updateGame(game, dtRaw) {
           if (!hitMe && miss < 2.2 && game.player.alive) {
             pushSound(fx, { type: 'whizz', x: origin.x, z: origin.z });
           }
-          if (result.cast.type === 'wall') addImpact(fx, result.cast.point, result.cast.box);
+          if (result.cast.type === 'wall') addImpact(fx, result.cast.point, result.cast.box, game.rng);
           if (result.cast.type === 'actor' && result.cast.actor.isPlayer) {
             const reg = registerDamage(match, shooter, result.cast.actor, result.hit);
             notifyHit(result.cast.actor, shooter.id, match.time);
@@ -907,7 +907,12 @@ function addTracer(fx, from, to, type) {
  * computed here rather than in the renderer because it belongs to the same
  * moment as the hit — the renderer only knows where, not what it stuck into.
  */
-function addImpact(fx, point, box) {
+/**
+ * `rng` is threaded in rather than read from Math.random: this is simulation
+ * code, and the whole point of the seeded generator is that a match replays
+ * identically. Sparks were the one place that quietly broke it.
+ */
+function addImpact(fx, point, box, rng = Math.random) {
   const face = box ? faceNormal(box, point) : null;
   const normal = face ? face.normal : [0, 1, 0];
 
@@ -926,13 +931,13 @@ function addImpact(fx, point, box) {
   // The debris. Sparks only come off hard surfaces; a body hit already has a
   // hitmarker and blood is a separate question.
   if (box && fx.sparks.length < SPARKS_MAX) {
-    const burst = sparkBurst(normal, 6, Math.random, 0.8, 3.4);
+    const burst = sparkBurst(normal, 6, rng, 0.8, 3.4);
     for (const b of burst) {
       if (fx.sparks.length >= SPARKS_MAX) break;
       fx.sparks.push({
         x: point.x, y: point.y, z: point.z,
         vx: b.vx, vy: b.vy, vz: b.vz,
-        age: 0, life: 0.35 + Math.random() * 0.25,
+        age: 0, life: 0.35 + rng() * 0.25,
       });
     }
   }

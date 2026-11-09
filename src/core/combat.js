@@ -5,7 +5,7 @@ import { damageAtDistance, resolveDamage, damageAllowed } from './damage.js';
 import { hitVolumes } from './actor.js';
 
 /** Ray vs sphere; returns distance or -1. `dir` normalised. */
-export function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, maxDist) {
+function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, maxDist) {
   const lx = ox - cx;
   const ly = oy - cy;
   const lz = oz - cz;
@@ -21,7 +21,7 @@ export function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, maxDist) {
 }
 
 /** Ray vs vertical cylinder (finite height); returns distance or -1. */
-export function rayCylinder(ox, oy, oz, dx, dy, dz, cx, cz, r, minY, maxY, maxDist) {
+function rayCylinder(ox, oy, oz, dx, dy, dz, cx, cz, r, minY, maxY, maxDist) {
   const lx = ox - cx;
   const lz = oz - cz;
   const a = dx * dx + dz * dz;
@@ -120,7 +120,7 @@ export function castShot({ origin, dir, actors, boxes, maxDist, shooterTeam, sho
  * Returns null when the shot is not allowed (friendly fire disabled, dead target)
  * or a result describing what happened.
  */
-export function applyHit(attacker, victim, { weapon, distance, headshot }) {
+function applyHit(attacker, victim, { weapon, distance, headshot }) {
   if (!victim.alive) return null;
   if (!damageAllowed(attacker.team, victim.team)) return null;
   const dmg = damageAtDistance(weapon, distance);

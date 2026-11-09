@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createGame, updateGame, possessTeammate, hudState } from '../src/core/game.js';
+import { createGame, updateGame, possessTeammate, hudState, restartMatch } from '../src/core/game.js';
 import { resetActorIds } from '../src/core/actor.js';
 
 function freshGame(seed = 21) {
@@ -203,6 +203,35 @@ test('a round restart restores a single player and no spectator', () => {
   assert.equal(game.match.actors.filter((a) => a.isPlayer).length, 1);
 });
 
+// The test above can pass without ever reaching a round start, so it does not
+// actually pin the thing that worries a player: "I took over a body — do I lose
+// it when the round ends?" Repossession happens through `restartMatch`, which
+// runs `beginRound` -> `resetActorForRound` over every actor. That path must
+// leave the possessed body as *the* player and as a human-driven (brainless)
+// actor, otherwise a takeover would quietly rot into a bot after one round.
+
+test('a full match restart keeps the body you took over', () => {
+  const game = freshGame(5);
+  run(game, 2);
+  const taken = teammates(game).find((a) => a.alive);
+  const body = possessTeammate(game, taken.id);
+  assert.ok(body, 'devralma başarısız oldu');
+
+  restartMatch(game, 'normal');
+
+  assert.equal(game.player, body, 'oyuncu referansı devralınan bedeni göstermiyor');
+  assert.equal(game.match.actors.filter((a) => a.isPlayer).length, 1);
+  assert.equal(game.player.brain, null, 'insan bedeni bot beyniyle simüle ediliyor');
+  assert.equal(game.player.alive, true);
+  assert.equal(game.match.phase, 'freeze');
+
+  // And it survives a freeze -> live transition, which resets actors again.
+  run(game, 4);
+  assert.equal(game.player, body);
+  assert.equal(game.player.alive, true);
+  assert.equal(game.match.actors.filter((a) => a.isPlayer).length, 1);
+});
+
 test('the game is still playable after a takeover', () => {
   const game = freshGame();
   possessTeammate(game, teammates(game).find((a) => a.alive).id);
@@ -211,4 +240,42 @@ test('the game is still playable after a takeover', () => {
   assert.ok(Number.isFinite(state.health));
   assert.ok(Number.isFinite(game.player.x) && Number.isFinite(game.player.z));
   assert.ok(game.player.x >= -31 && game.player.x <= 31, `haritadan çıktı: ${game.player.x}`);
+});
+
+// ── determinism ─────────────────────────────────────────────────────────────
+//
+// A seeded match must replay identically. Combat sparks were the one place that
+// read Math.random directly, which broke that quietly: two runs of the same
+// seed diverged in effect state while every gameplay number still matched.
+
+test('the same seed produces the same effects, not just the same score', () => {
+  // Sample the sparks on the frame they are created. Letting them live out
+  // their 0.4 s lifetime and then reading `fx.sparks` compares two empty arrays
+  // and passes no matter what the spark code does — which is exactly how the
+  // first version of this test failed to catch the Math.random it was written
+  // for.
+  const runOnce = () => {
+    const game = freshGame(4242);
+    game.pc.yaw = -Math.PI / 2;
+    game.input.fire = true;
+    let sparks = null;
+    for (let i = 0; i < 240 && !sparks; i++) {
+      updateGame(game, 1 / 60);
+      if (game.fx.sparks.length) {
+        sparks = game.fx.sparks.map((s) => [
+          Number(s.vx.toFixed(4)),
+          Number(s.vy.toFixed(4)),
+          Number(s.life.toFixed(4)),
+        ]);
+      }
+    }
+    const marks = game.fx.marks.map((m) => [Number(m.x.toFixed(3)), Number(m.y.toFixed(3))]);
+    return { sparks, marks, shots: game.matchStats.shots };
+  };
+  const a = runOnce();
+  const b = runOnce();
+  assert.ok(a.shots > 0, 'test hiç ateş etmedi');
+  assert.ok(a.sparks && a.sparks.length > 0, 'hiç kıvılcım üretilmedi');
+  assert.deepEqual(a.marks, b.marks, 'kurşun izleri deterministik değil');
+  assert.deepEqual(a.sparks, b.sparks, 'kıvılcımlar deterministik değil (Math.random sızmış)');
 });

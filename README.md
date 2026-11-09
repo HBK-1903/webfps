@@ -436,6 +436,16 @@ kendi harita bilgilerini doğru kullanmalarını sağladı.
     kullanıyordu, yani "zorluk kademeleri monoton" iddiası tek bir blokla sınanıyordu ve blok yeniden
     üretilemiyordu. `--seed-base` eklendi; zorluk ayrımının kazanma oranı yerine K/D ve raund süresiyle
     okunması gerektiği de bu sırada ölçüldü (kazanma oranı bloklar arası ±10 puan oynuyor).
+14. **Sarsıntı ayarı her yeni maçta sıfırlanıyordu.** Ayarlar açılışta, henüz hiç oyun yokken uygulanıyor;
+    `applySettings` içindeki `if (app.game)` koruması bu yüzden "sarsıntı" gibi oyuna bağlı seçenekleri
+    sessizce atlıyordu. Oyuncu sarsıntıyı kapatıp sayfayı yenilediğinde ayar kayıtlı kalıyor ama maça hiç
+    uygulanmıyordu. Yeni oyun `startMatchFlow` içinde doğrudan ayardan besleniyor. `tests/app.e2e.test.js`
+    bu akışı gerçek DOM'da sınıyor (düzeltme geri alınınca test kırılıyor).
+15. **Çarpma kıvılcımları tohumu atlıyordu.** `addImpact` kıvılcım patlaması ve kıvılcım ömrü için
+    `Math.random()` çağırıyordu. Oyun sayıları (skor, hasar) aynı kalıyor, ama aynı tohumla iki koşu
+    efekt durumunda ayrışıyordu. RNG artık parametre olarak geçiyor ve üç çağrı yerinin hepsi maç RNG'sini
+    veriyor. Regresyon testi kıvılcımı **oluştuğu karede** örnekliyor: 240 kare sonra `fx.sparks`
+    okumak iki boş dizi karşılaştırır ve hatayla bile geçer (bu tuzak bir tur kaybettirdi).
 
 ---
 
@@ -508,6 +518,35 @@ bot-vs-bot maçında **%50.9 / %49.1**.
 
 ---
 
+## 7d. Kod tazeleme: ölü ağırlık taraması
+
+"Fazlalıkları bul" isteği bir taramayla cevaplandı; sonuç hem silinen hem de **bilerek korunan** şeyleri
+içeriyor, çünkü `export` anahtar kelimesini her yerden silmek kodu sağlamlaştırmaz, sadece kırar.
+
+Yöntem: `src/`, `tools/`, `tests/` ve `build.mjs` içindeki tüm `import { … }` deyimleri toplanıp 206
+dışa aktarımla karşılaştırıldı (namespace import'ları ayrıca elle kontrol edildi — yok sayılsalardı
+`applyHit` gibi semboller yanlışlıkla "ölü" görünürdü).
+
+**Silinen (31 sembol; dışa kapalı kalan 29 → 2'ye indi):**
+
+| Tür | Örnekler | Neden |
+|---|---|---|
+| Kendi dosyasında kullanılan, hiç import edilmeyen | `claimCover`, `coverClaimed`, `markHot`, `latestHot`, `separateFromOthers`, `squadSweepGoal`, `rayBox`, `resolveCircle`, `raySphere`, `rayCylinder`, `isFriendly`, `createFxState`, `clearTransientFx`, `boxToAABB`, `smoothPath`, `setAngles`, `wrapYaw`, `clampPitch`, `degToRad`, `finishReload`, `resetWeapon`, `canInstall`, `isStandalone`, `promptInstall`, `eyeHeight` | `export` kaldırıldı, davranış aynı |
+| Tek satırlık ölü takma ad | `GAME_SUBTITLE`, `WEAPON_ORDER`, `DIFFICULTY_ORDER`, `CARDINAL_POINTS`, `LANES` | Tamamen silindi (gerçek sabitler `CARDINALS` / `LANE_CENTRES`) |
+| **Gerçek ölü fonksiyon** | `absorbRecoil` (`player.js`) | Hiçbir yerden çağrılmıyordu; aynı işi `game.js` satır içi yapıyor. Silinmeden önce davranış farkı olmadığı doğrulandı (yaw sönümü zaten `updateWeapon`'da) |
+
+**Bilerek dışa açık bırakılanlar:**
+
+- `beginRound` (`match.js`) — `startMatch` / `endRound` / `finishMatch` ile simetrik tur yaşam döngüsü
+  yüzeyi. Bugün yalnızca `startMatch` çağırıyor ama "turu başlat" meşru bir dış işlem.
+- `QUALITY` (`scene.js`) — `applyQuality`'nin geçerli girdilerini sayan tablo; çağıranın bilmesi gereken
+  bir sözleşme.
+
+**Taranıp temiz çıkanlar:** `src/` içinde `console.log`, `debugger`, `TODO`, `FIXME` **yok**. Tek
+`console.info` denge panelinin bilinçli JSON dökümü. `game.js` dışındaki `Math.random` kullanımları
+(`audio.js`, `impact.js`, `viewmodel.js`, `actorRigs.js`) simülasyona değil sunuma ait — tohumlu tekrar
+üretilebilirliği etkilemiyorlar.
+
 ## 8. Unity'ye taşıma notları
 
 Bu proje bilerek taşınabilir bir iskelet bırakır. Eşleme:
@@ -547,7 +586,7 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 302 headless test |
+| `npm test` | 305 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
 | `npm run visual` | Gerçek Chromium'da oyunu açar: 37 adım + nişangah/girdi/pozlama/harita/kariyer/çarpma/ölüm/killcam ölçümü (§10b) |

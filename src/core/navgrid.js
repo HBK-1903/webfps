@@ -216,7 +216,7 @@ class MinHeap {
 }
 
 /** Drop intermediate waypoints when the straight line is walkable. */
-export function smoothPath(points, grid) {
+function smoothPath(points, grid) {
   if (points.length < 3) return points;
   const out = [points[0]];
   let i = 0;

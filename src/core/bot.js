@@ -146,7 +146,7 @@ export function createCoordinator() {
 }
 
 /** Claim a cover point for this bot (teammates then pick something else). */
-export function claimCover(coordinator, bot, point, time) {
+function claimCover(coordinator, bot, point, time) {
   if (!coordinator || !coordinator.claims) return;
   const key = `${point.x.toFixed(1)},${point.z.toFixed(1)}`;
   coordinator.claims = coordinator.claims.filter((c) => time - c.time < 8 && c.by !== bot.id && c.key !== key);
@@ -155,7 +155,7 @@ export function claimCover(coordinator, bot, point, time) {
 }
 
 /** True when a living teammate already claimed this cover point. */
-export function coverClaimed(coordinator, bot, point, time) {
+function coverClaimed(coordinator, bot, point, time) {
   if (!coordinator || !coordinator.claims) return false;
   const key = `${point.x.toFixed(1)},${point.z.toFixed(1)}`;
   return coordinator.claims.some((c) => c.team === bot.team && c.by !== bot.id && c.key === key && time - c.time < 8);
@@ -184,7 +184,7 @@ export function latestHelp(coordinator, team, time, selfId, maxAge = 5) {
 }
 
 /** Remember where a contact was lost so the squad can converge there. */
-export function markHot(coordinator, x, z, time) {
+function markHot(coordinator, x, z, time) {
   if (!coordinator || !coordinator.hot) return;
   const recent = coordinator.hot[coordinator.hot.length - 1];
   if (recent && Math.hypot(recent.x - x, recent.z - z) < 6) {
@@ -195,7 +195,7 @@ export function markHot(coordinator, x, z, time) {
   if (coordinator.hot.length > 6) coordinator.hot.shift();
 }
 
-export function latestHot(coordinator, time, maxAge = 25) {
+function latestHot(coordinator, time, maxAge = 25) {
   if (!coordinator || !coordinator.hot) return null;
   for (let i = coordinator.hot.length - 1; i >= 0; i--) {
     const h = coordinator.hot[i];
@@ -283,7 +283,7 @@ export function laneSlot(actor) {
  * squads are deliberately aimed at each other's half, which is what makes a
  * contact-free round converge instead of circling.
  */
-export function squadSweepGoal(coordinator, bot, grid) {
+function squadSweepGoal(coordinator, bot, grid) {
   const zone = coordinator.hunt[bot.team];
   const hz = zone || ENEMY_SPAWN_AREA[bot.team];
   // Spread the squad around the zone in a loose line rather than stacking on the
@@ -607,7 +607,7 @@ function combatTick(match, bot, dt, ctx) {
  * (and the player) that is closer than `separateRadius`, using the same
  * box-aware movement as everything else, so it can never be shoved into a wall.
  */
-export function separateFromOthers(match, bot, boxes, separateRadius = 0.92) {
+function separateFromOthers(match, bot, boxes, separateRadius = 0.92) {
   // Only true body overlap is resolved (2 * PLAYER.radius is ~0.84 m). A larger
   // radius would fight the path follower: in the narrow spawn door the bots have
   // to queue single file, and pushing them apart there just cancelled the
