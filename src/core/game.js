@@ -27,6 +27,9 @@ import {
   freeCameraStep,
   deathFade,
   sampleKillcam,
+  killcamFrame,
+  killcamProgress,
+  killcamUsable,
   lerpAngle,
 } from './deathcam.js';
 
@@ -121,6 +124,10 @@ export function createGame({ difficulty = 'normal', seed = 12345, grid = null } 
       pitch: 0,
     },
     killcam: createKillcam(),
+    // Playback rate for the killcam. 1 in normal play; the headless visual test
+    // lowers it because a 1.8 s replay at ~2 fps is a handful of frames and any
+    // observation from outside the page races it.
+    killcamSpeed: 1,
     // What the player's side currently knows about enemy positions. Deliberately
     // *not* a mirror of `match.actors`: the minimap reads this, and if it read
     // the actors directly it would reveal every enemy on the map regardless of
@@ -522,6 +529,11 @@ export function updateGame(game, dtRaw) {
       game.spectate.cam = null;
       game.spectate.targetId = null;
       game.killcam.frames.length = 0;
+      // The playback handle has to go with the buffer. Clearing the frames but
+      // leaving the playback alive left the camera bound to a replay whose
+      // footage had just been deleted — the first tick after respawning read
+      // an empty buffer and the camera stayed wherever the replay left it.
+      game.killcamPlayback = null;
     } else if (e.type === 'round_end') {
       fx.roundBanner = null;
       pushSound(fx, { type: e.winner === 'A' ? 'round_win' : 'round_loss' });
@@ -582,18 +594,23 @@ function onPlayerDeath(game) {
   // Replay the seconds before the shot from the killer's side. Positions come
   // from the buffer of the player's own camera, so the replay shows the real
   // approach rather than a reconstruction.
+  //
+  // The camera is fixed at the killer's eyes and *tracks* the victim across the
+  // replay: the recorded buffer holds where the player's own eyes were, so the
+  // replay shows the real path the victim walked rather than a straight line
+  // drawn from where they started to where they died. The killer's position is
+  // not reconstructed, because it was never recorded and inventing it would
+  // show a replay of something that did not happen.
   const kc = game.killcam;
   game.killcamPlayback = null;
-  if (killer && kc.frames.length > 1) {
+  if (killer && killcamUsable(kc, match.time)) {
     const start = Math.max(kc.frames[0].t, match.time - KILLCAM_SECONDS);
     game.killcamPlayback = {
       start,
       end: match.time,
       t: start,
-      // A camera fixed at the killer's eyes, aimed at where the player was
-      // when the shot landed.
-      from: { x: killer.x, y: eyePoint(killer).y, z: killer.z },
-      to: { x: game.player.x, y: eyePoint(game.player).y, z: game.player.z },
+      killerEye: { x: killer.x, y: eyePoint(killer).y, z: killer.z },
+      killerName: killer.name,
       done: false,
     };
   }
@@ -682,12 +699,28 @@ function updateSpectate(game, dt) {
   // killer's, not the spectator's.
   const kb = game.killcamPlayback;
   if (kb && !kb.done) {
-    kb.t += dt;
+    // `speed` exists for the headless visual test: at ~2 fps the 1.8 s window
+    // is only a handful of frames and a poll on the test side can miss it
+    // entirely, which made the check pass and fail on alternate runs. The game
+    // never changes it.
+    kb.t += dt * (kb.speed ?? game.killcamSpeed ?? 1);
     if (kb.t >= kb.end) {
       kb.done = true;
+      kb.cam = null;
+      // Hand the camera over cleanly: without this the first spectate frame
+      // jumps from the killer's eye to the teammate in a single tick.
+      sp.cam = null;
     } else {
-      const sample = sampleKillcam(game.killcam, kb.t);
-      if (sample) sp.cam = { x: sample.x, y: sample.y, z: sample.z, yaw: sample.yaw, pitch: sample.pitch };
+      const victim = sampleKillcam(game.killcam, kb.t);
+      const frame = victim ? killcamFrame(kb.killerEye, victim) : null;
+      if (frame) {
+        sp.cam = frame;
+        // The replay camera is mirrored onto its own field. `sp.cam` is also
+        // written by the spectator follow logic, so anything asking "is the
+        // killcam running, and from where" cannot tell the two apart from that
+        // field alone. This one is only ever the replay.
+        kb.cam = frame;
+      }
       return;
     }
   }
@@ -737,13 +770,21 @@ function updateSpectate(game, dt) {
     sp.cam.pitch += (target.pitch - sp.cam.pitch) * k;
 
     // Pressing a movement key detaches into free flight.
-    if (wantsFreeCam(game.input)) {
+    //
+    // Not while the killcam is playing: the replay owns the camera and the
+    // player's hands are still on WASD from the fight they just lost. The first
+    // version checked this unconditionally, so a player who died while holding
+    // forward dropped out of the replay on its first frame and never saw it.
+    const replaying = game.killcamPlayback && !game.killcamPlayback.done;
+    if (!replaying && wantsFreeCam(game.input)) {
       sp.mode = 'free';
       sp.locked = false;
     }
   }
 
-  if (sp.mode === 'free') {
+  // Free flight is skipped entirely while a replay owns the camera, even if an
+  // earlier tick already flipped the mode.
+  if (sp.mode === 'free' && !(game.killcamPlayback && !game.killcamPlayback.done)) {
     const step = freeCameraStep(sp.cam, game.input, dt);
     const clamped = clampCamera(step.x, step.y, step.z, SPECTATE_BOUNDS);
     sp.cam = { ...sp.cam, x: clamped.x, y: clamped.y, z: clamped.z };
@@ -985,14 +1026,8 @@ export function hudState(game) {
     killcam: game.killcamPlayback
       ? {
           playing: !game.killcamPlayback.done,
-          progress: Math.max(
-            0,
-            Math.min(
-              1,
-              (game.killcamPlayback.t - game.killcamPlayback.start) /
-                Math.max(0.01, game.killcamPlayback.end - game.killcamPlayback.start),
-            ),
-          ),
+          progress: killcamProgress(game.killcamPlayback),
+          killerName: game.killcamPlayback.killerName,
         }
       : null,
     spectate: {

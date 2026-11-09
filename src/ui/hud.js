@@ -47,6 +47,9 @@ export function createHud() {
     deathKiller: $('death-killer'),
     deathDetail: $('death-detail'),
     deathHeadshot: $('death-headshot'),
+    killcamBar: $('killcam-bar'),
+    killcamName: $('killcam-name'),
+    killcamFill: $('killcam-fill'),
     spectateBar: $('spectate-bar'),
     spectateName: $('spectate-name'),
     spectateMode: $('spectate-mode'),
@@ -361,8 +364,13 @@ export function createHud() {
 
       // death overlay
       const dead = !p.playerAlive && (p.phase === 'live' || p.phase === 'round_end');
-      toggleClass(el.deathOverlay, 'hidden', !dead);
-      if (dead) {
+      // The report and the killcam are mutually exclusive: the replay plays
+      // first, then the report explains it. Showing both at once put a large
+      // "ELENDİN" across the middle of the killcam, hiding the exact frame the
+      // player wants to see.
+      const inKillcam = Boolean(p.killcam && p.killcam.playing);
+      toggleClass(el.deathOverlay, 'hidden', !dead || inKillcam);
+      if (dead && !inKillcam) {
         // The report. Filled from `deathInfo`, which the game builds on the
         // frame the player dies; the fallback text keeps the screen coherent
         // when a round ends before the report arrives.
@@ -389,11 +397,21 @@ export function createHud() {
         }
       }
 
+      // Killcam letterbox + caption. The bars tell the player they are watching
+      // a replay rather than playing, which is the difference between "I died"
+      // and "the game froze".
+      const kc = p.killcam;
+      toggleClass(el.killcamBar, 'hidden', !inKillcam);
+      if (kc && inKillcam) {
+        setText(el.killcamName, kc.killerName || '—');
+        el.killcamFill.style.transform = `scaleX(${Math.max(0, Math.min(1, kc.progress)).toFixed(3)})`;
+      }
+
       // Spectator bar: only while dead and only once the death report has had
       // its moment. Showing both at once crowds the screen at the exact time
       // the player is trying to work out what happened.
       const spectating = dead && p.spectate && p.spectate.mode !== 'none';
-      const showBar = spectating && (!p.deathInfo || p.deathInfo.age > 1.4);
+      const showBar = spectating && !inKillcam && (!p.deathInfo || p.deathInfo.age > 1.4);
       toggleClass(el.spectateBar, 'hidden', !showBar);
       if (showBar) {
         if (p.spectate.mode === 'free') {

@@ -25,6 +25,9 @@ import {
   cameraOccluded,
   freeCameraStep,
   killcamUsable,
+  lookAt,
+  killcamFrame,
+  killcamProgress,
 } from '../src/core/deathcam.js';
 
 const PLAYER = 1;
@@ -378,8 +381,15 @@ function liveGame(seed = 21) {
   return g;
 }
 
-/** Kill the player through the real damage path so the death event fires. */
-function killPlayer(game, { headshot = true, distance = 6 } = {}) {
+/**
+ * Kill the player through the real damage path so the death event fires.
+ *
+ * `lead` matters: the killcam replays from a buffer of previous frames, so a
+ * test that kills on the very first tick has no footage to replay and the
+ * feature correctly declines to start. Real play always has a full buffer.
+ */
+function killPlayer(game, { headshot = true, distance = 6, lead = 1.5 } = {}) {
+  for (let t = 0; t < lead; t += 1 / 60) updateGame(game, 1 / 60);
   const foe = game.match.actors.find((a) => a.team !== game.player.team && a.alive);
   foe.x = game.player.x + distance;
   foe.z = game.player.z;
@@ -463,4 +473,199 @@ test('the death report never renders a weapon from the wrong actor', () => {
   const foe = killPlayer(game);
   const state = hudState(game);
   assert.equal(state.deathInfo.killer.id, foe.id, 'rapor yanlış katili gösteriyor');
+});
+
+// ── killcam framing ─────────────────────────────────────────────────────────
+//
+// The killcam is shot from where the killer stood, aimed at the victim's real
+// recorded position. Getting the yaw convention wrong here aims the replay at a
+// wall behind the action, which looks like the feature simply not working.
+
+test('lookAt faces the victim along -Z when directly ahead', () => {
+  const a = lookAt({ x: 0, y: 1.6, z: 0 }, { x: 0, y: 1.6, z: -10 });
+  assert.ok(Math.abs(a.yaw) < 1e-9, `yaw ${a.yaw}`);
+  assert.ok(Math.abs(a.pitch) < 1e-9);
+});
+
+test('lookAt turns right for a target on the +X side', () => {
+  const a = lookAt({ x: 0, y: 1.6, z: 0 }, { x: 10, y: 1.6, z: 0 });
+  assert.ok(Math.abs(a.yaw - Math.PI / 2) < 1e-6, `yaw ${a.yaw}`);
+});
+
+test('lookAt turns left for a target on the -X side', () => {
+  const a = lookAt({ x: 0, y: 1.6, z: 0 }, { x: -10, y: 1.6, z: 0 });
+  assert.ok(Math.abs(a.yaw + Math.PI / 2) < 1e-6, `yaw ${a.yaw}`);
+});
+
+test('lookAt pitches up for a target above', () => {
+  const a = lookAt({ x: 0, y: 1, z: 0 }, { x: 0, y: 11, z: -10 });
+  assert.ok(a.pitch > 0.5, `pitch ${a.pitch}`);
+});
+
+test('lookAt pitches down for a target below', () => {
+  const a = lookAt({ x: 0, y: 1, z: 0 }, { x: 0, y: -4, z: -10 });
+  assert.ok(a.pitch < -0.2, `pitch ${a.pitch}`);
+});
+
+test('lookAt never returns NaN for a zero-length view', () => {
+  const a = lookAt({ x: 1, y: 1, z: 1 }, { x: 1, y: 1, z: 1 });
+  assert.ok(Number.isFinite(a.yaw) && Number.isFinite(a.pitch));
+});
+
+test('a killcam frame sits behind the killer and aims at the victim', () => {
+  const frame = killcamFrame(
+    { x: 0, y: 1.6, z: 0 },
+    { x: 0, y: 1.6, z: -10 },
+  );
+  // Facing -Z, so "behind" is +Z, and the aim is straight ahead.
+  assert.ok(frame.z > 0, `kamera arkada değil: z=${frame.z}`);
+  assert.ok(Math.abs(frame.yaw) < 1e-9, `nişan yanlış: yaw=${frame.yaw}`);
+});
+
+test('the killcam tracks the victim across the replay', () => {
+  const killer = { x: 0, y: 1.6, z: 0 };
+  const first = killcamFrame(killer, { x: -4, y: 1.6, z: -10 });
+  const later = killcamFrame(killer, { x: 4, y: 1.6, z: -10 });
+  assert.ok(first.yaw < 0, 'kurban soldayken kamera sola bakmalı');
+  assert.ok(later.yaw > 0, 'kurban sağdayken kamera sağa bakmalı');
+});
+
+test('the killcam camera does not jump when the victim crosses behind', () => {
+  // Sweeping the victim in front of the killer must produce a smooth yaw walk,
+  // not a 2π flip. A flip makes the replay spin.
+  const killer = { x: 0, y: 1.6, z: 0 };
+  let prev = null;
+  for (let i = 0; i <= 20; i++) {
+    const x = -9 + i * 0.9;
+    const frame = killcamFrame(killer, { x, y: 1.6, z: -10 });
+    if (prev !== null) {
+      const step = Math.abs(frame.yaw - prev);
+      assert.ok(step < 0.5, `yaw ${i}. adımda sıçradı: ${step.toFixed(2)}`);
+    }
+    prev = frame.yaw;
+  }
+});
+
+test('a killcam frame with a missing input is null, not a broken camera', () => {
+  assert.equal(killcamFrame(null, { x: 0, y: 0, z: 0 }), null);
+  assert.equal(killcamFrame({ x: 0, y: 0, z: 0 }, null), null);
+});
+
+test('killcam progress runs from 0 to 1', () => {
+  const pb = { start: 10, end: 12, t: 10 };
+  assert.equal(killcamProgress(pb), 0);
+  pb.t = 11;
+  assert.ok(Math.abs(killcamProgress(pb) - 0.5) < 1e-9);
+  pb.t = 12;
+  assert.equal(killcamProgress(pb), 1);
+});
+
+test('killcam progress is clamped outside the window', () => {
+  assert.equal(killcamProgress({ start: 10, end: 12, t: 5 }), 0);
+  assert.equal(killcamProgress({ start: 10, end: 12, t: 99 }), 1);
+  assert.equal(killcamProgress(null), 0);
+});
+
+test('a zero-length killcam window does not divide by zero', () => {
+  assert.ok(Number.isFinite(killcamProgress({ start: 5, end: 5, t: 5 })));
+});
+
+// ── killcam wiring in the live game ─────────────────────────────────────────
+//
+// The pure math passed while the feature did nothing on screen. These assert
+// that the simulation actually drives the camera from the killer's eyes, that
+// the replay window is real, and that it does not overstay.
+
+test('dying starts a killcam aimed from the killer, not from the victim', () => {
+  const game = liveGame();
+  const foe = killPlayer(game);
+  assert.ok(game.killcamPlayback, 'killcam başlamadı');
+  assert.equal(game.killcamPlayback.killerName, foe.name);
+  // The camera origin must be at the killer, which is where we placed them.
+  const eye = game.killcamPlayback.killerEye;
+  assert.ok(Math.abs(eye.x - foe.x) < 1e-6, 'killcam kamerası katilin gözünde değil');
+});
+
+test('the killcam camera tracks the victim during the replay', () => {
+  const game = liveGame();
+  killPlayer(game);
+  // Drive the replay forward and check the camera points at roughly where the
+  // victim was: the killer was placed 6 m to the +X side, so the replay should
+  // look toward -X, i.e. a yaw near -π/2 (or +π/2 depending on side).
+  updateGame(game, 1 / 60);
+  const cam = game.spectate.cam;
+  assert.ok(cam, 'killcam kamerası kurulmadı');
+  const yawAbs = Math.abs(Math.atan2(Math.sin(cam.yaw), Math.cos(cam.yaw)));
+  assert.ok(yawAbs > 1.0, `kamera kurbana bakmıyor: yaw ${cam.yaw.toFixed(2)}`);
+});
+
+test('the killcam ends and hands the camera to the spectator', () => {
+  const game = liveGame();
+  killPlayer(game);
+  // Run past the replay window.
+  for (let i = 0; i < 200; i++) updateGame(game, 1 / 60);
+  assert.equal(game.killcamPlayback.done, true, 'killcam hiç bitmiyor');
+  assert.notEqual(game.spectate.mode, 'none', 'killcam sonrası seyirci yok');
+});
+
+test('the HUD is told whether the killcam is playing', () => {
+  const game = liveGame();
+  killPlayer(game);
+  updateGame(game, 1 / 60);
+  const state = hudState(game);
+  assert.ok(state.killcam, 'HUD killcam durumunu almıyor');
+  assert.equal(state.killcam.playing, true);
+  assert.ok(state.killcam.progress >= 0 && state.killcam.progress <= 1);
+  assert.ok(state.killcam.killerName, 'katilin adı yok');
+});
+
+test('a killcam with too little footage is not started at all', () => {
+  const game = liveGame();
+  // Kill immediately, with no lead-in frames: a replay of two frames reads as a
+  // freeze, so the feature must decline rather than show a stutter.
+  const foe = game.match.actors.find((a) => a.team !== game.player.team && a.alive);
+  foe.x = game.player.x + 6;
+  foe.z = game.player.z;
+  game.killcam.frames.length = 0;
+  registerDamage(game.match, foe, game.player, {
+    healthLost: game.player.health,
+    killed: true,
+  });
+  updateGame(game, 1 / 60);
+  assert.equal(game.killcamPlayback, null, 'yetersiz görüntüyle killcam başlatıldı');
+});
+
+test('the new round clears the killcam', () => {
+  const game = liveGame();
+  killPlayer(game);
+  assert.ok(game.killcamPlayback);
+  // Let the replay finish, then finish the round. Ending the round mid-replay
+  // would clear the buffer underneath a camera that is still reading it.
+  for (let i = 0; i < 200; i++) updateGame(game, 1 / 60);
+  for (const foe of game.match.actors) {
+    if (foe.team !== game.player.team) {
+      foe.alive = false;
+      foe.hp = 0;
+    }
+  }
+  updateGame(game, 1 / 60);
+  game.match.roundEndTimer = 0.001;
+  updateGame(game, 1 / 60);
+  game.match.phaseTime = 0;
+  updateGame(game, 1 / 60);
+  assert.equal(game.killcamPlayback, null, 'yeni raundda killcam kalmış');
+  assert.equal(game.killcam.frames.length, 0, 'tampon temizlenmemiş');
+});
+
+test('holding a movement key does not cancel the killcam', () => {
+  // Exactly the bug a player would hit: you die mid-strafe, WASD is still held,
+  // and the replay drops out on its first frame. Measured in the browser as
+  // "the killcam never appears", which looked like the feature not existing.
+  const game = liveGame();
+  game.input.forward = 1;
+  killPlayer(game);
+  updateGame(game, 1 / 60);
+  assert.ok(game.killcamPlayback && !game.killcamPlayback.done, 'killcam bitti');
+  assert.notEqual(game.spectate.mode, 'free', 'hareket tuşu killcam iptal etti');
+  assert.ok(game.spectate.cam, 'killcam kamerası kurulmadı');
 });

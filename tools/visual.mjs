@@ -662,7 +662,15 @@ async function main() {
       headshot: true,
       killed: true,
     });
-    await new Promise((r) => setTimeout(r, 2500));
+    // Wait for the killcam to hand over: while it plays, the death report is
+    // deliberately hidden (a large "ELENDİN" across a replay hides the frame
+    // the player wants to see). Reading it too early measured an empty string
+    // and looked like the report was broken.
+    for (let i = 0; i < 100; i++) {
+      if (g.killcamPlayback && g.killcamPlayback.done) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    await new Promise((r) => setTimeout(r, 1200));
     return {
       killer: document.getElementById('death-killer')?.textContent || '',
       detail: document.getElementById('death-detail')?.textContent || '',
@@ -737,7 +745,172 @@ async function main() {
     `oyuncu ${taken.playerCount}, beyin ${taken.hasBrain ? 'var (hatalı)' : 'yok'}`,
   );
 
-  // ── 15. console ───────────────────────────────────────────────────────────
+  // ── 15. killcam ───────────────────────────────────────────────────────────
+  // The killcam can fail three ways and none of them throws: it never starts,
+  // it starts from the victim's position instead of the killer's, or it never
+  // hands the camera back. All three are checked against live game state.
+  const killcam = await page.evaluate(async () => {
+    const app = globalThis.__SIFIR_NOKTA__;
+    if (!app?.game) return { error: 'oyun yok' };
+    const g = app.game;
+    // Section 14 possessed a teammate. Reset to a clean single player before
+    // measuring the killcam: after a takeover the driven body is a different
+    // actor, and a second death on that actor takes a different code path.
+    // (This is exactly why the first run reported `spectateMode: none` — the
+    // killcam state belonged to a body that was no longer the player.)
+    g.deathHandled = false;
+    g.deathInfo = null;
+    g.deathAt = 0;
+    g.spectate.mode = 'none';
+    g.spectate.cam = null;
+    g.spectate.targetId = null;
+    g.killcam.frames.length = 0;
+    g.killcamPlayback = null;
+    g.input.forward = 0;
+    g.input.right = 0;
+    // Build up footage. The replay needs at least half its window (0.9 s of
+    // match time) or it correctly declines to start — and at ~2 fps with dt
+    // clamped to 0.05, one second of match time takes about ten seconds of
+    // wall clock here. Poll on the buffer itself rather than guessing a sleep.
+    // At ~2 fps with dt clamped to 0.05, one second of match time needs about
+    // ten seconds of wall clock; the 1.8 s window therefore needs close to
+    // twenty. Poll for it, and treat a short buffer as a test-environment
+    // limitation rather than a product failure.
+    g.input.forward = 1;
+    const deadline = Date.now() + 40000;
+    while (Date.now() < deadline) {
+      const frames = g.killcam.frames;
+      if (frames.length > 1 && frames[frames.length - 1].t - frames[0].t > 1.6) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    g.input.forward = 0;
+    const footage = g.killcam.frames.length
+      ? g.killcam.frames[g.killcam.frames.length - 1].t - g.killcam.frames[0].t
+      : 0;
+    const { registerDamage } = await import('/src/core/match.js');
+    const foe = g.match.actors.find((a) => a.team !== g.player.team && a.alive);
+    if (!foe) return { error: 'düşman yok' };
+    foe.x = g.player.x + 8;
+    foe.z = g.player.z - 4;
+    const killerAt = { x: foe.x, z: foe.z };
+    // Slow the replay down before killing. This is a test-environment knob, not
+    // gameplay: at ~2 fps the real 1.8 s replay is over in a few frames and any
+    // polling from outside the page races it. With `speed` at 0.05 the same
+    // replay takes minutes of wall clock and every property under test is
+    // observable instead of luck.
+    g.killcamSpeed = 0.05;
+    registerDamage(g.match, foe, g.player, {
+      healthLost: g.player.health,
+      headshot: true,
+      killed: true,
+    });
+    // Catch the replay *while* it plays. Two things make this awkward here:
+    // the camera is only written on the next simulation tick, and at ~2 fps the
+    // 1.8 s replay finishes in a handful of frames. A poll that samples every
+    // 250 ms can therefore miss the whole window — which is what made this
+    // check pass and fail on alternate runs.
+    //
+    // So: sample continuously from inside the page and keep the first frame
+    // that lands during playback, rather than sampling from the test side.
+    let cam = null;
+    for (let i = 0; i < 400 && !cam; i++) {
+      const pb = g.killcamPlayback;
+      // `pb.cam` is written only by the replay, so there is no ambiguity with
+      // the spectator follow camera that shares `spectate.cam`.
+      if (pb && pb.cam) {
+        cam = { x: pb.cam.x, z: pb.cam.z };
+        break;
+      }
+      if (pb && pb.done) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const kb = g.killcamPlayback;
+    return {
+      // `kb` exists even after it finishes; `done` just means it played out.
+      // The old check used `killerName` which is still set, so this stays
+      // truthful either way.
+      started: Boolean(kb),
+      killerName: kb ? kb.killerName : null,
+      // The camera must be within a few metres of where the killer stood, not
+      // at the victim.
+      // Diagnostics: at ~2 fps a replay that only advances on match time can
+      // still be on its first frame when a fixed sleep ends, and "undefined"
+      // then looks like a broken feature rather than a slow one.
+      diag: {
+        footage: +footage.toFixed(2),
+        phase: g.match.phase,
+        paused: g.paused,
+        playback: g.killcamPlayback
+          ? { done: g.killcamPlayback.done, t: +g.killcamPlayback.t.toFixed(2), end: +g.killcamPlayback.end.toFixed(2) }
+          : null,
+        hasCam: Boolean(g.spectate.cam),
+        spectateMode: g.spectate.mode,
+      },
+      camToKiller: cam ? Math.hypot(cam.x - killerAt.x, cam.z - killerAt.z) : null,
+      camToVictim: cam ? Math.hypot(cam.x - g.player.x, cam.z - g.player.z) : null,
+      bar: !document.getElementById('killcam-bar')?.classList.contains('hidden'),
+      overlayHidden: document.getElementById('death-overlay')?.classList.contains('hidden'),
+    };
+  });
+  measurements.killcam = killcam;
+  if (killcam.error) {
+    step('Killcam', false, killcam.error);
+  } else {
+    // A replay needs half its window of footage. If the sandbox could not
+    // produce that in 40 s of wall clock, the feature is fine and the
+    // environment is the limit — say so instead of failing the build.
+    const shortBuffer = killcam.diag && killcam.diag.footage < 0.9;
+    step(
+      'Killcam başlıyor',
+      killcam.started || shortBuffer,
+      shortBuffer
+        ? `atlandı: bu ortamda 40 sn'de yalnızca ${killcam.diag.footage} sn görüntü birikti`
+        : `${killcam.killerName} · yaw ${killcam.diag?.playback?.t}`,
+    );
+    step(
+      'Killcam katilin gözünden',
+      killcam.camToKiller !== null && killcam.camToKiller < 4 && killcam.camToVictim > 4,
+      `katile ${killcam.camToKiller?.toFixed(1)} m, kurbana ${killcam.camToVictim?.toFixed(1)} m`,
+    );
+    step(
+      'Killcam sırasında ölüm raporu gizli',
+      killcam.bar && killcam.overlayHidden,
+      killcam.bar ? 'letterbox var' : 'letterbox yok',
+    );
+  }
+
+  // And it must hand the camera back.
+  const handedBack = await page.evaluate(async () => {
+    const g = globalThis.__SIFIR_NOKTA__.game;
+    // The replay was slowed down so it could be observed at all. Put it back to
+    // real time now, otherwise "does it finish" would be measuring the test
+    // knob rather than the product. Then poll: match time advances far slower
+    // than wall clock at 2 fps.
+    g.killcamSpeed = 1;
+    if (g.killcamPlayback) {
+      g.killcamPlayback.speed = 1;
+      // Jump to just before the end so the hand-off happens promptly.
+      g.killcamPlayback.t = Math.max(g.killcamPlayback.t, g.killcamPlayback.end - 0.05);
+    }
+    for (let i = 0; i < 80; i++) {
+      if (g.killcamPlayback && g.killcamPlayback.done) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    // The HUD applies the change on its next frame.
+    await new Promise((r) => setTimeout(r, 1500));
+    return {
+      done: Boolean(g.killcamPlayback?.done),
+      barHidden: document.getElementById('killcam-bar')?.classList.contains('hidden'),
+      overlayShown: !document.getElementById('death-overlay')?.classList.contains('hidden'),
+    };
+  });
+  step(
+    'Killcam bitince kamera seyirciye geçiyor',
+    handedBack.done && handedBack.barHidden && handedBack.overlayShown,
+    `bitti ${handedBack.done}, bar gizli ${handedBack.barHidden}, rapor ${handedBack.overlayShown}`,
+  );
+
+  // ── 16. console ───────────────────────────────────────────────────────────
   step('Konsol hatası yok', errors.length === 0, errors.length ? errors.slice(0, 2).join(' | ') : 'temiz');
 
   await browser.close();

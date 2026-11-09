@@ -274,3 +274,57 @@ export function killcamUsable(killcam, deathTime) {
 }
 
 export { MAX_SAMPLE_GAP };
+
+/**
+ * Aim a fixed camera (the killer's eyes) at a moving point.
+ *
+ * The killcam is shot from where the killer stood. The killer does not move
+ * during the replay — only their head turns — because a full reconstruction of
+ * the killer's own path is not what was recorded, and inventing it would show
+ * a replay that never happened. Locking the position and tracking the victim
+ * is honest: it is exactly "what the killer saw".
+ */
+export function lookAt(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dz = to.z - from.z;
+  const horizontal = Math.hypot(dx, dz);
+  // Yaw convention matches the game: 0 is north (-z), +yaw turns right (east).
+  const yaw = Math.atan2(dx, -dz);
+  const pitch = Math.atan2(dy, Math.max(1e-6, horizontal));
+  return { yaw, pitch };
+}
+
+/**
+ * One frame of the killcam: the killer's position, aimed at the victim at that
+ * instant.
+ *
+ * `victimSample` comes from the buffer recorded around the player, which stores
+ * where the player's eyes were — so the replay tracks the real path the victim
+ * took, not a straight line to where they ended up.
+ */
+export function killcamFrame(killerEye, victimSample, offset = { back: 2.4, up: 0.45 }) {
+  if (!killerEye || !victimSample) return null;
+  // Step back along the aim direction over the killer's shoulder. The first
+  // value tried was 0.9 m, which put the camera inside the killer's helmet:
+  // measured on screen, the helmet filled half the frame and hid the person
+  // who was actually shot. 2.4 m clears the body entirely while still reading
+  // as "from where they stood".
+  const aim = lookAt(killerEye, victimSample);
+  const x = killerEye.x - Math.sin(aim.yaw) * offset.back;
+  const z = killerEye.z + Math.cos(aim.yaw) * offset.back;
+  const y = killerEye.y + offset.up;
+  return { x, y, z, yaw: aim.yaw, pitch: aim.pitch };
+}
+
+/**
+ * How much of the killcam has played, 0..1.
+ *
+ * Kept separate so the HUD and the letterbox can drive off the same number
+ * rather than each doing their own arithmetic and drifting apart.
+ */
+export function killcamProgress(playback) {
+  if (!playback) return 0;
+  const span = Math.max(1e-6, playback.end - playback.start);
+  return Math.max(0, Math.min(1, (playback.t - playback.start) / span));
+}

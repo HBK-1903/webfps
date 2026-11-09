@@ -1053,3 +1053,88 @@ kbd {
   background: rgba(6, 8, 10, 0.6);
   color: #9db0b2;
 }
+
+/* ── killcam ────────────────────────────────────────────────────────────── */
+
+/* Above the HUD (z-index 10) on purpose: the letterbox bars have to cover the
+   team lists and ammo counter, otherwise the corners read as a live match and
+   the replay is ambiguous. The first version sat at 14 and the HUD punched
+   through the black bars. */
+.killcam {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+
+/* While the replay runs, the HUD steps back. It is not the live game and the
+   numbers on it are the dead player's.
+   `:has()` because the killcam element is a sibling of the HUD, not inside it —
+   the `~` combinator would only work if it came first in the document. */
+body:has(#killcam-bar:not(.hidden)) #hud .team-list,
+body:has(#killcam-bar:not(.hidden)) #hud .fps,
+body:has(#killcam-bar:not(.hidden)) #hud .vitals,
+body:has(#killcam-bar:not(.hidden)) #hud .ammo,
+body:has(#killcam-bar:not(.hidden)) #hud .minimap-wrap,
+body:has(#killcam-bar:not(.hidden)) #hud .round-status {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+/* Letterbox bars. They are the universally understood "this is a replay"
+   signal, and they also cover the HUD corners that would otherwise sit on top
+   of the footage and make it read as live gameplay. */
+.killcam-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 9vh;
+  background: #05080a;
+}
+
+.killcam-bar.top { top: 0; }
+.killcam-bar.bottom { bottom: 0; }
+
+.killcam-caption {
+  position: absolute;
+  top: calc(9vh + 26px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  background: rgba(5, 8, 10, 0.78);
+  backdrop-filter: blur(4px);
+}
+
+.killcam-kicker {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: #8fa3a9;
+}
+
+.killcam-name {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #ff9d8a;
+}
+
+.killcam-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 9vh;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.killcam-progress-fill {
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: var(--accent);
+}

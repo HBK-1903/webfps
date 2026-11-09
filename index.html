@@ -340,6 +340,19 @@
         </div>
       </div>
 
+      <!-- Killcam. Letterbox bars and a caption, so it is unmistakable that
+           this is a replay and not the live game. -->
+      <div id="killcam-bar" class="killcam hidden" aria-live="polite">
+        <div class="killcam-bar top"></div>
+        <div class="killcam-bar bottom"></div>
+        <div class="killcam-caption">
+          <span class="killcam-kicker">TEKRAR</span>
+          <span id="killcam-name" class="killcam-name">—</span>
+          <span class="killcam-kicker">GÖZÜNDEN</span>
+        </div>
+        <div class="killcam-progress"><div id="killcam-fill" class="killcam-progress-fill"></div></div>
+      </div>
+
       <!-- Spectator bar. Says who you are watching and how to change it. -->
       <div id="spectate-bar" class="spectate-bar hidden" role="status">
         <span class="spectate-label">İZLİYORSUN</span>

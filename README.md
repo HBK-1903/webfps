@@ -547,10 +547,10 @@ oyunun kural setini değiştirmez (hasar formülü, LOS ve zorluk mantığı ayn
 | Komut | Ne yapar |
 |---|---|
 | `npm run dev` | Statik dev sunucusu (host/origin allowlist yok, önizleme uyumlu) |
-| `npm test` | 282 headless test |
+| `npm test` | 302 headless test |
 | `npm run lint` | ESLint (hata odaklı) |
 | `npm run a11y` | Erişilebilirlik denetimi (axe-core, WCAG 2.1 A/AA) — şu an **6 ekran / 0 ihlal** |
-| `npm run visual` | Gerçek Chromium'da oyunu açar: 33 adım + nişangah/girdi/pozlama/harita/kariyer/çarpma/ölüm ölçümü (§10b) |
+| `npm run visual` | Gerçek Chromium'da oyunu açar: 37 adım + nişangah/girdi/pozlama/harita/kariyer/çarpma/ölüm/killcam ölçümü (§10b) |
 | `npm run visual:setup` | Görsel test tarayıcısını kurar (`.playwright/`, ~200 MB, tek seferlik) |
 | `npm run audio` | Her sesi çevrimdışı render edip ölçer: tepe/RMS/uzunluk/merkez frekans (§10c) |
 | `npm run audio:live` | Oyunu açar, gerçek bir tur oynar ve mikserin ne çaldığını raporlar (§10c) |
@@ -864,13 +864,32 @@ eklenmişti — yani hata ayıklama anlık görüntüsüne, HUD'un okuduğu yere
 testleri, kablolama hatalarını yakalamaz.** Bu yüzden bu turdan sonra `hudState`'in sözleşmesini doğrulayan
 6 test eklendi.
 
-#### Dürüst sınırlar
+#### Killcam
 
-- **Killcam kaydediliyor ama oynatılmıyor.** Tampon dolu, örnekleme test edildi, ama kamera geçişi çalışmıyor
-  — `updateSpectate` içindeki oynatma dalı yazıldı fakat sahne görüntüsüne bağlanmadı. Söylemem gereken
-  şey: bu kısım yarım.
-- **Devralınan botun nişan alması** kendi becerin, ama botun görüş açısı ve duruşu devraldığın yerden
-  geliyor; bu bir hile değil, CS2'deki davranışın aynısı.
+Ölürken son 1.8 saniye **katilin gözünden** tekrar oynatılıyor. Kamera katilin durduğu yere sabitleniyor
+(katilin kendi yürüyüşü hiç kaydedilmedi, uydurmak olmayan bir şeyi göstermek olurdu) ve kurbanın kaydedilmiş
+gerçek konumunu takip ediyor. Letterbox çubukları ve "TEKRAR &lt;ad&gt; GÖZÜNDEN" altyazısı var; bu sırada HUD
+ve ölüm raporu gizleniyor, çünkü ikisi aynı anda ekrana gelince rapor tam da görmek istediğin kareyi
+kapatıyordu.
+
+**Bu turda bulunan üç gerçek hata:**
+1. **Hareket tuşu killcam'ı iptal ediyordu.** Ölürken WASD'ye basılı tutmak normal (az önce savaşıyordun),
+   ama serbest kamera kontrolü bunu görüp replay'i ilk karede düşürüyordu. Oyun içinde "killcam hiç
+   görünmüyor" olarak okunurdu.
+2. **Yeni raundda killcam takılı kalıyordu.** `killcam.frames` temizleniyordu ama `killcamPlayback`
+   temizlenmiyordu — yeniden doğan oyuncunun kamerası, görüntüsü silinmiş bir replay'e bağlı kalıyordu.
+3. **Kamera katilin kafasının içindeydi.** 0.9 m geri çekme miğferi ekranın yarısına sokuyordu; ekranda
+   ölçüldü, 2.4 m'ye çıkarıldı.
+
+**Ölçümün kendisi de üç kez yanlış yazıldı** ve bunu not etmeye değer: 2 FPS'te 1.8 saniyelik bir replay
+birkaç kare sürüyor, dışarıdan yoklama yapınca kontrol dönüşümlü olarak geçip kalıyordu. Çözüm testte
+replay hızını düşürmek (`killcamSpeed`) ve killcam'in **kendi kamera alanını** tutmak oldu — `spectate.cam`
+hem seyirci hem replay tarafından yazıldığı için hangisinin ne olduğu belirsizdi.
+
+#### Dürüst sınır
+
+**Devralınan botun nişan alması** kendi becerin, ama botun görüş açısı ve duruşu devraldığın yerden
+geliyor; bu bir hile değil, CS2'deki davranışın aynısı.
 
 ## 11. Lisans / varlıklar
 
